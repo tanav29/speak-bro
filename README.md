@@ -2,6 +2,10 @@
 
 ![demo image](demo.png)
 
+| Loom Video                         | Tweet + Video                                          |
+| ---------------------------- | ------------------------------------------------ |
+| [loom](https://www.loom.com/share/6d2f029295484bcda62a58d4f01d78cd) | [tweet+video](https://x.com/tanavtwt/status/2077837126079807786) |
+
 A **local-first AI voice assistant** with long-term memory. Speak, and it transcribes, thinks, and talks back — speech (STT + TTS) runs on your own hardware, and **SuperMemory** is the persistent brain across sessions.
 
 ## Why it's built this way
