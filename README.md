@@ -1,6 +1,6 @@
 # SpeakBro
 
-![alt text](image.png)
+![demo image](demo.png)
 
 A **local-first AI voice assistant** with long-term memory. Speak, and it transcribes, thinks, and talks back — speech (STT + TTS) runs on your own hardware, and **SuperMemory** is the persistent brain across sessions.
 
