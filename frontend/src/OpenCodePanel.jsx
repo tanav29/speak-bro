@@ -4,19 +4,20 @@ import {
   formatStatusLabel,
   fetchSession,
   fetchSessionMessages,
+  fetchSessionStatus,
 } from "./opencodeApi";
 
 function Badge({ children, tone = "neutral" }) {
   const tones = {
-    neutral: "border-white/8 bg-white/[0.04] text-slate-300",
-    good: "border-emerald-500/20 bg-emerald-500/8 text-emerald-300",
+    neutral: "border-white/10 bg-white/5 text-slate-300",
+    good: "border-emerald-500/20 bg-emerald-500/8 text-emerald-400",
     warning: "border-amber-500/20 bg-amber-500/8 text-amber-300",
-    danger: "border-rose-500/20 bg-rose-500/8 text-rose-300",
+    danger: "border-rose-500/20 bg-rose-500/8 text-rose-400",
   };
 
   return (
     <span
-      className={`inline-flex items-center rounded border px-2 py-0.5 text-[8px] font-mono font-medium uppercase tracking-wider ${tones[tone] || tones.neutral}`}>
+      className={`inline-flex items-center rounded border px-2 py-1 text-xs font-mono font-medium uppercase tracking-wider ${tones[tone] || tones.neutral}`}>
       {children}
     </span>
   );
@@ -43,6 +44,18 @@ function formatRelativeTime(value) {
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
   return `${days}d ago`;
+}
+
+function statusKind(status) {
+  const label = formatStatusLabel(status).toLowerCase();
+  if (label.includes("error") || label.includes("failed")) return "error";
+  if (
+    label.includes("busy") ||
+    label.includes("running") ||
+    label.includes("active")
+  )
+    return "busy";
+  return "idle";
 }
 
 function statusTone(status) {
@@ -87,7 +100,7 @@ function CopyButton({ text }) {
   return (
     <button
       onClick={handleCopy}
-      className="rounded border border-white/10 bg-white/[0.04] px-1.5 py-0.5 text-[8px] font-mono font-medium uppercase tracking-wider text-[#93a7c6] transition hover:bg-white/10 hover:text-white active:scale-95"
+      className="rounded border border-white/10 bg-white/5 px-2 py-1 text-xs font-mono font-medium uppercase tracking-wider text-slate-400 transition hover:bg-white/10 hover:text-white active:scale-95"
       type="button"
       title="Copy session ID">
       {copied ? "\u2713" : "ID"}
@@ -108,11 +121,11 @@ function SessionField({ label, children, span = false }) {
   if (!children && children !== 0) return null;
   return (
     <div
-      className={`rounded-lg border border-white/5 bg-white/[0.015] px-2.5 py-1.5 ${span ? "col-span-2" : ""}`}>
-      <div className="text-[8px] font-mono tracking-widest text-[#5a7091] uppercase">
+      className={`rounded-lg border border-white/5 bg-white/5 px-2.5 py-1.5 ${span ? "col-span-2" : ""}`}>
+      <div className="text-xs font-mono tracking-widest text-slate-500 uppercase">
         {label}
       </div>
-      <div className="break-all font-mono text-[10px] text-[#cfe0f5] mt-0.5">
+      <div className="break-all font-mono text-xs text-slate-200 mt-0.5">
         {children}
       </div>
     </div>
@@ -148,7 +161,7 @@ function SessionDetail({ session, onBack, onDelete, deleting }) {
       <div className="flex items-center gap-2">
         <button
           onClick={onBack}
-          className="rounded-lg border border-white/10 bg-white/6 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[#93a7c6] transition hover:bg-white/10 hover:text-white active:scale-95"
+          className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs font-bold uppercase tracking-wider text-slate-400 transition hover:bg-white/10 hover:text-white active:scale-95"
           type="button">
           {"← Back"}
         </button>
@@ -157,7 +170,7 @@ function SessionDetail({ session, onBack, onDelete, deleting }) {
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-1.5 text-[9px] text-[#7f96b8]">
+      <div className="grid grid-cols-2 gap-2 text-xs text-slate-400">
         {/* <SessionField label="Project ID" span>{s.projectID || "—"}</SessionField>
         <SessionField label="Version">{s.version || "—"}</SessionField> */}
         {/* <SessionField label="Parent ID">{s.parentID || "—"}</SessionField> */}
@@ -191,12 +204,12 @@ function SessionDetail({ session, onBack, onDelete, deleting }) {
             href={s.share.url}
             target="_blank"
             rel="noreferrer"
-            className="rounded border border-emerald-400/20 bg-emerald-400/10 px-1.5 py-px text-[8px] font-bold uppercase tracking-wider text-emerald-300 transition hover:bg-emerald-400/20">
+            className="rounded border border-emerald-500/20 bg-emerald-500/10 px-2 py-px text-xs font-bold uppercase tracking-wider text-emerald-400 transition hover:bg-emerald-500/20">
             Open share
           </a>
         )}
         {s.summary && (
-          <span className="text-[9px] text-emerald-400/70">
+          <span className="text-xs text-emerald-400/70">
             +{s.summary.additions}/-{s.summary.deletions} · {s.summary.files}{" "}
             files
           </span>
@@ -204,27 +217,27 @@ function SessionDetail({ session, onBack, onDelete, deleting }) {
         <button
           onClick={() => onDelete(s.id)}
           disabled={deleting}
-          className="ml-auto rounded border border-rose-400/25 bg-rose-400/10 px-1.5 py-px text-[8px] font-bold uppercase tracking-wider text-rose-300 transition hover:bg-rose-400/20 disabled:opacity-50"
+          className="ml-auto rounded border border-rose-500/25 bg-rose-500/10 px-2 py-px text-xs font-bold uppercase tracking-wider text-rose-400 transition hover:bg-rose-500/20 disabled:opacity-50"
           type="button">
           {deleting ? "Deleting..." : "Delete"}
         </button>
       </div>
 
       {diffs.length > 0 && (
-        <details className="rounded-lg border border-white/8 bg-white/[0.02] px-2 py-1 text-[9px]">
-          <summary className="cursor-pointer uppercase tracking-wider text-[#5a7091]">
+        <details className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs">
+          <summary className="cursor-pointer uppercase tracking-wider text-slate-500">
             Diffs ({diffs.length})
           </summary>
           <div className="mt-1 flex flex-col gap-1">
             {diffs.map((diff, i) => (
               <div
                 key={i}
-                className="rounded border border-white/8 bg-white/[0.03] px-1.5 py-1">
-                <div className="text-[#cfe0f5]">
+                className="rounded border border-white/10 bg-white/5 px-2 py-1">
+                <div className="text-slate-200">
                   {diff.path ?? diff.file ?? "unknown"}
                 </div>
                 {diff.content && (
-                  <pre className="mt-0.5 max-h-32 overflow-auto whitespace-pre-wrap break-words font-sans text-[#9fb4d4]">
+                  <pre className="mt-0.5 max-h-32 overflow-auto whitespace-pre-wrap break-words font-sans text-slate-300">
                     {diff.content}
                   </pre>
                 )}
@@ -236,7 +249,7 @@ function SessionDetail({ session, onBack, onDelete, deleting }) {
 
       <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto log-body">
         {messages === null ? (
-          <div className="flex flex-1 items-center justify-center text-[10px] text-[#5a7091]">
+          <div className="flex flex-1 items-center justify-center text-xs text-slate-500">
             Loading transcript...
           </div>
         ) : messages.length ? (
@@ -249,27 +262,27 @@ function SessionDetail({ session, onBack, onDelete, deleting }) {
             return (
               <div
                 key={info.id ?? i}
-                className={`rounded-lg border px-2 py-1.5 text-[10px] leading-relaxed ${
+                className={`rounded-lg border px-2 py-1.5 text-xs leading-relaxed ${
                   isUser
                     ? "border-sky-400/20 bg-sky-400/[0.06]"
-                    : "border-white/8 bg-white/[0.03]"
+                    : "border-white/10 bg-white/5"
                 }`}>
-                <div className="mb-0.5 flex items-center justify-between gap-1.5">
-                  <span className="text-[8px] font-bold uppercase tracking-wider text-[#5a7091]">
+                <div className="mb-0.5 flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
                     {isUser ? "You" : "OpenCode"}
                   </span>
-                  <span className="text-[7px] text-[#475569]">
+                  <span className="text-xs text-slate-600">
                     {formatTime(info.time?.created)}
                   </span>
                 </div>
-                <pre className="whitespace-pre-wrap break-words font-sans text-[#d4e4ff]">
+                <pre className="whitespace-pre-wrap break-words font-sans text-slate-200">
                   {text}
                 </pre>
               </div>
             );
           })
         ) : (
-          <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-white/10 bg-white/[0.02] p-4 text-center text-[10px] text-[#7f96b8]">
+          <div className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-white/10 bg-white/5 p-4 text-center text-xs text-slate-400">
             No messages in this session yet.
           </div>
         )}
@@ -289,6 +302,31 @@ export function OpenCodePanel({
   const sessions = snapshot?.sessions ?? [];
   const sessionStatus = snapshot?.sessionStatus ?? {};
   const connected = snapshot?.connected;
+  const [liveStatus, setLiveStatus] = useState(sessionStatus);
+
+  // Keep this deliberately independent from the full snapshot: status is cheap to
+  // poll and gives the board a responsive feel even when no SSE event arrives.
+  useEffect(() => {
+    setLiveStatus(sessionStatus);
+  }, [snapshot?.sessionStatus]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const next = await fetchSessionStatus();
+        if (!cancelled && next && typeof next === "object") setLiveStatus(next);
+      } catch {
+        // The connection badge and snapshot error communicate server failures.
+      }
+    };
+    void poll();
+    const timer = setInterval(poll, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
   const configInfo = snapshot?.config;
 
   const [view, setView] = useState("list");
@@ -338,9 +376,9 @@ export function OpenCodePanel({
   );
 
   return (
-    <section className="flex flex-1 h-full flex-col min-h-0 bg-bg-200/50">
+    <section className="flex flex-1 h-full flex-col min-h-0 bg-zinc-900/50">
       {view === "detail" && detailSession ? (
-        <div className="p-6 overflow-y-auto h-full">
+        <div className="p-3 overflow-y-auto h-full">
           <SessionDetail
             session={detailSession}
             onBack={closeDetail}
@@ -350,29 +388,26 @@ export function OpenCodePanel({
         </div>
       ) : (
         <>
-          <div className="flex items-center justify-between p-4 border-b border-white/10 shrink-0">
+          <div className="flex items-center justify-between p-2 px-3 border-b border-white/10 shrink-0">
             <div className="flex items-center gap-3 min-w-0">
-              <h2 className="text-[13px] font-semibold text-white tracking-wide shrink-0">
+              <h2 className="text-sm font-semibold text-white tracking-wide shrink-0">
                 OpenCode
               </h2>
-              <Badge tone={connected ? "good" : "danger"}>
-                {connected ? "Online" : "Offline"}
-              </Badge>
               {configInfo?.model && (
-                <span className="text-[11px] font-medium text-gray-800 truncate hidden sm:inline">
+                <span className="text-xs font-medium text-zinc-400 truncate hidden sm:inline">
                   {configInfo.model}
                 </span>
               )}
             </div>
             <div className="flex gap-2 shrink-0">
               <button
-                className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-[11px] font-semibold text-gray-900 transition hover:bg-white/10 hover:text-white cursor-pointer shadow-sm"
+                className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-zinc-200 transition hover:bg-white/10 hover:text-white cursor-pointer shadow-sm"
                 onClick={onRefresh}
                 type="button">
                 Refresh
               </button>
               <button
-                className="rounded-lg border border-accent-blue/20 bg-accent-blue/10 px-3 py-1.5 text-[11px] font-semibold text-accent-blue transition hover:bg-accent-blue/20 cursor-pointer shadow-sm"
+                className="rounded-lg border border-sky-500/20 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-400 transition hover:bg-sky-500/20 cursor-pointer shadow-sm"
                 onClick={() => setComposing((v) => !v)}
                 type="button">
                 + New
@@ -380,22 +415,22 @@ export function OpenCodePanel({
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-4">
+          <div className="flex-1 overflow-y-auto flex flex-col gap-4">
             {!connected && (
-              <div className="rounded-xl border border-accent-amber/20 bg-accent-amber/10 px-4 py-3 text-[12px] text-accent-amber">
+              <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
                 OpenCode offline. Run terminal workspace service to sync active
                 environments.
               </div>
             )}
 
             {snapshot?.error && (
-              <div className="rounded-xl border border-accent-rose/20 bg-accent-rose/10 px-4 py-3 text-[12px] text-accent-rose">
+              <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-400">
                 {snapshot.error}
               </div>
             )}
 
             {composing && (
-              <div className="flex items-center gap-3 animate-in rounded-xl border border-accent-blue/20 bg-accent-blue/10 px-4 py-3 shadow-sm">
+              <div className="flex items-center gap-3 animate-in rounded-lg border border-sky-500/20 bg-sky-500/10 px-4 py-3 shadow-sm">
                 <input
                   autoFocus
                   value={newTitle}
@@ -408,11 +443,11 @@ export function OpenCodePanel({
                     }
                   }}
                   placeholder="Workspace/Session Title..."
-                  className="min-w-0 flex-1 bg-transparent text-[13px] text-white placeholder:text-gray-800 outline-none"
+                  className="min-w-0 flex-1 bg-transparent text-sm text-white placeholder:text-zinc-400 outline-none"
                 />
                 <button
                   onClick={handleCreate}
-                  className="rounded-lg bg-accent-blue text-white px-3 py-1.5 text-[11px] font-semibold transition hover:opacity-90 cursor-pointer shadow-sm"
+                  className="rounded-lg bg-sky-500 text-white px-3 py-1.5 text-xs font-semibold transition hover:opacity-90 cursor-pointer shadow-sm"
                   type="button">
                   Create
                 </button>
@@ -421,120 +456,128 @@ export function OpenCodePanel({
                     setComposing(false);
                     setNewTitle("");
                   }}
-                  className="rounded-lg px-2 py-1.5 text-[12px] text-gray-800 transition hover:text-white cursor-pointer"
+                  className="rounded-lg px-2 py-1.5 text-sm text-zinc-400 transition hover:text-white cursor-pointer"
                   type="button">
                   ✕
                 </button>
               </div>
             )}
 
-            <div className="flex flex-col gap-3 flex-1 min-h-[200px]">
+            <div className="flex flex-col gap-3 flex-1 h-full overflow-y-auto">
               {sessions.length ? (
-                sessions.slice(0, limit).map((session) => {
-                  const isActive = session.id === selectedSessionId;
-                  const status = sessionStatus[session.id];
-                  const confirming = confirmingId === session.id;
-                  return (
-                    <div
-                      key={session.id}
-                      className={`rounded-xl border px-4 py-3 transition shadow-sm ${
-                        isActive
-                          ? "border-accent-blue/30 bg-accent-blue/10"
-                          : "border-white/10 bg-white/5 hover:bg-white/10 hover:border-white/20"
-                      }`}>
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex min-w-0 items-center gap-2 flex-1">
-                          <span
-                            className={`truncate text-[13px] font-semibold ${isActive ? "text-accent-blue" : "text-white"}`}>
-                            {formatSessionTitle(session)}
-                          </span>
-                          {session.share?.url && (
-                            <span className="text-[10px] font-medium text-accent-emerald/90 shrink-0 border border-accent-emerald/20 px-1.5 rounded bg-accent-emerald/10">
-                              Shared
+                <div className="flex min-h-0 flex-1 gap-2">
+                  {["busy", "idle"].map((column) => {
+                    const columnSessions = sessions
+                      .slice(0, limit)
+                      .filter(
+                        (session) =>
+                          statusKind(liveStatus[session.id]) === column,
+                      );
+                    return (
+                      <div
+                        key={column}
+                        className="flex min-w-0 flex-1 flex-col bg-black/10">
+                        <div className="mb-1.5 flex items-center justify-between px-1">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-bold text-zinc-200">
+                              {column}
                             </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <CopyButton text={session.id} />
-                          {status && (
-                            <Badge tone={statusTone(status)}>
-                              {formatStatusLabel(status)}
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="mt-1.5 flex items-center gap-2 text-[11px] text-gray-800">
-                        {session.directory && (
-                          <span className="font-mono truncate max-w-[200px] bg-bg-200 px-1.5 py-0.5 rounded border border-white/5 text-gray-900">
-                            {session.directory}
-                          </span>
-                        )}
-                        <span className="shrink-0 font-medium">
-                          {formatRelativeTime(
-                            session.time?.updated ?? session.time?.created,
-                          )}
-                        </span>
-                        {session.summary && (
-                          <span className="shrink-0 text-accent-emerald/80 font-medium">
-                            +{session.summary.additions}/-
-                            {session.summary.deletions}
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="mt-3 flex items-center gap-2">
-                        <button
-                          onClick={() =>
-                            onSelectSession(isActive ? null : session.id)
-                          }
-                          className={`rounded-lg border px-3 py-1 text-[10px] font-semibold tracking-wide transition cursor-pointer ${
-                            isActive
-                              ? "border-accent-blue/40 bg-accent-blue text-white shadow-sm hover:opacity-90"
-                              : "border-white/10 bg-white/5 text-gray-900 hover:bg-white/10 hover:text-white"
-                          }`}
-                          type="button">
-                          {isActive ? "Selected" : "Select"}
-                        </button>
-                        <button
-                          onClick={() => openDetail(session)}
-                          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-semibold tracking-wide text-gray-900 transition hover:bg-white/10 hover:text-white cursor-pointer"
-                          type="button">
-                          Details
-                        </button>
-                        {confirming ? (
-                          <div className="ml-auto flex items-center gap-2 bg-accent-rose/10 px-2 rounded-lg border border-accent-rose/20 py-0.5">
-                            <span className="text-[10px] font-medium text-accent-rose">
-                              Delete?
-                            </span>
-                            <button
-                              onClick={() => handleDelete(session.id)}
-                              disabled={deletingId === session.id}
-                              className="rounded bg-accent-rose text-white px-2 py-0.5 text-[9px] font-semibold transition hover:opacity-90 disabled:opacity-50 cursor-pointer shadow-sm"
-                              type="button">
-                              {deletingId === session.id ? "..." : "Yes"}
-                            </button>
-                            <button
-                              onClick={() => setConfirmingId(null)}
-                              className="rounded px-1.5 py-0.5 text-[10px] text-gray-800 transition hover:text-white cursor-pointer"
-                              type="button">
-                              No
-                            </button>
                           </div>
-                        ) : (
-                          <button
-                            onClick={() => setConfirmingId(session.id)}
-                            className="ml-auto text-[11px] font-semibold text-gray-800 transition hover:text-accent-rose cursor-pointer px-2 py-1 rounded hover:bg-accent-rose/10"
-                            type="button">
-                            Delete
-                          </button>
-                        )}
+                          <span className="text-xs font-mono text-zinc-400">
+                            {columnSessions.length}
+                          </span>
+                        </div>
+                        <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pr-0.5">
+                          {columnSessions.length ? (
+                            columnSessions.map((session) => {
+                              const isActive = session.id === selectedSessionId;
+                              const status = liveStatus[session.id];
+                              const confirming = confirmingId === session.id;
+                              return (
+                                <div
+                                  key={session.id}
+                                  className={`border p-2 transition ${isActive ? "border-sky-500/40 bg-sky-500/10" : "border-white/10 bg-white/5 hover:bg-white/10"}`}>
+                                  <div className="flex items-start justify-between gap-1">
+                                    <button
+                                      onClick={() => openDetail(session)}
+                                      className="min-w-0 truncate text-left text-xs font-semibold text-white hover:text-sky-400"
+                                      type="button"
+                                      title={formatSessionTitle(session)}>
+                                      {formatSessionTitle(session)}
+                                    </button>
+                                    <CopyButton text={session.id} />
+                                  </div>
+                                  <div className="mt-1 flex items-center gap-1 text-xs text-zinc-400">
+                                    <span className="truncate font-mono">
+                                      {session.directory || "No directory"}
+                                    </span>
+                                    <span className="ml-auto shrink-0">
+                                      {formatRelativeTime(
+                                        session.time?.updated ??
+                                          session.time?.created,
+                                      )}
+                                    </span>
+                                  </div>
+                                  <div className="mt-1.5 flex items-center gap-1">
+                                    <button
+                                      onClick={() =>
+                                        onSelectSession(
+                                          isActive ? null : session.id,
+                                        )
+                                      }
+                                      className={`rounded border px-2 py-1 text-xs font-semibold ${isActive ? "border-sky-500/40 bg-sky-500 text-white" : "border-white/10 text-zinc-200 hover:text-white"}`}
+                                      type="button">
+                                      {isActive ? "Selected" : "Select"}
+                                    </button>
+                                    {session.summary && (
+                                      <span className="text-xs text-emerald-400/80">
+                                        +{session.summary.additions}/-
+                                        {session.summary.deletions}
+                                      </span>
+                                    )}
+                                    {confirming ? (
+                                      <>
+                                        <button
+                                          onClick={() =>
+                                            handleDelete(session.id)
+                                          }
+                                          className="ml-auto text-xs text-rose-400"
+                                          type="button">
+                                          Confirm
+                                        </button>
+                                        <button
+                                          onClick={() => setConfirmingId(null)}
+                                          className="text-xs text-zinc-400"
+                                          type="button">
+                                          ×
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <button
+                                        onClick={() =>
+                                          setConfirmingId(session.id)
+                                        }
+                                        className="ml-auto text-xs text-zinc-400 hover:text-rose-400"
+                                        type="button">
+                                        Delete
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })
+                          ) : (
+                            <div className="py-5 text-center text-xs text-zinc-400">
+                              No {column} sessions
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })
+                    );
+                  })}
+                </div>
               ) : (
-                <div className="flex-1 flex items-center justify-center rounded-2xl border border-dashed border-white/10 bg-white/5 p-6 text-[13px] font-medium text-gray-800">
+                <div className="flex flex-1 items-center justify-center rounded-lg border border-dashed border-white/10 bg-white/5 p-6 text-xs text-zinc-400">
                   No sessions created yet
                 </div>
               )}
@@ -542,7 +585,7 @@ export function OpenCodePanel({
               {sessions.length > limit && (
                 <button
                   onClick={() => setLimit((l) => l + 8)}
-                  className="mt-2 rounded-xl border border-white/10 bg-white/5 py-2.5 text-[11px] font-semibold text-gray-900 transition hover:bg-white/10 hover:text-white cursor-pointer shadow-sm"
+                  className="mt-2 rounded-lg border border-white/10 bg-white/5 py-2.5 text-xs font-semibold text-zinc-200 transition hover:bg-white/10 hover:text-white cursor-pointer shadow-sm"
                   type="button">
                   Load more sessions ({sessions.length - limit})
                 </button>

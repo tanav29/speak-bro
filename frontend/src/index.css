@@ -1,105 +1,42 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Geist", "Inter", system-ui, sans-serif;
-  --font-mono: "Geist Mono", "JetBrains Mono", monospace;
-
-  --color-bg-100: #000000;
-  --color-bg-200: #0a0a0a;
-  --color-bg-300: #111111;
-  
-  --color-gray-100: #1a1a1a;
-  --color-gray-200: #2a2a2a;
-  --color-gray-300: #3a3a3a;
-  --color-gray-400: #4a4a4a;
-  --color-gray-800: #a1a1aa;
-  --color-gray-900: #e4e4e7;
-  --color-gray-1000: #ffffff;
-
-  --color-accent-blue: #0070f3;
-  --color-accent-purple: #7928ca;
-  --color-accent-pink: #ff0080;
-  --color-accent-emerald: #10b981;
-  --color-accent-rose: #f43f5e;
-  --color-accent-amber: #f59e0b;
-
-  --animate-in: animate-in 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-  --animate-slide-up: slide-up 0.5s cubic-bezier(0.16, 1, 0.3, 1);
-  --animate-fade-in: fade-in 0.3s ease-out;
-  --animate-pulse-slow: pulse-slow 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-}
-
-@keyframes slide-up {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-@keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-@keyframes animate-in {
-  from { opacity: 0; transform: scale(0.98); }
-  to { opacity: 1; transform: scale(1); }
-}
-@keyframes pulse-slow {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  --font-sans: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, monospace;
 }
 
 :root {
   color-scheme: dark;
 }
 
-html, body {
+html,
+body,
+#root {
   min-height: 100%;
-  background: var(--color-bg-100);
-  color: var(--color-gray-1000);
-  font-family: var(--font-sans);
+  margin: 0;
+  background: #0a0a0a;
+  color: #f4f4f5;
+  font-family: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
 }
 
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
-::-webkit-scrollbar-track {
-  background: transparent;
-}
+
 ::-webkit-scrollbar-thumb {
-  background: var(--color-gray-300);
-  border-radius: 4px;
+  background: #3f3f46;
+  border-radius: 999px;
 }
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-gray-400);
-}
-
-.scrollbar-none {
-  scrollbar-width: none;
-}
-.scrollbar-none::-webkit-scrollbar {
-  display: none;
-}
-
-.geist-panel {
-  background: rgba(10, 10, 10, 0.65);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 8px 32px -8px rgba(0, 0, 0, 0.6);
-}
-
-.geist-card {
-  background: var(--color-bg-200);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  transition: border-color 0.2s ease, transform 0.2s ease;
-}
-.geist-card:hover {
-  border-color: rgba(255, 255, 255, 0.15);
-}
-
-:focus-visible {
-  outline: 2px solid var(--color-accent-blue);
-  outline-offset: 2px;
-}
-

@@ -31,6 +31,10 @@ export function prettyJson(value) {
   }
 }
 
+export async function fetchSessionStatus() {
+  return fetchJSON(opencodeUrl("/session/status"));
+}
+
 export async function fetchSnapshot() {
   const [sessions, sessionStatus, config, pathInfo] = await Promise.all([
     fetchJSON(opencodeUrl("/session")),
@@ -77,6 +81,16 @@ export async function fetchSessionMessages(id, limit) {
   } catch {
     return [];
   }
+}
+
+export async function sendMessageToSession(id, message) {
+  return fetchJSON(opencodeUrl(`/session/${id}/prompt_async`), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      parts: [{ type: "text", text: message }],
+    }),
+  });
 }
 
 async function fetchJSON(url, init) {

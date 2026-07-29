@@ -9,7 +9,6 @@ import {
   deleteSession,
   opencodeUrl,
 } from "./opencodeApi";
-import { PixelAvatar } from "./PixelAvatar";
 
 const TARGET_SAMPLE_RATE = 16000;
 const MAX_TRANSCRIPTS = 12;
@@ -60,39 +59,6 @@ function floatTo16BitPCM(input) {
   return output;
 }
 
-const PHASE_STYLES = {
-  idle: {
-    gradient: "from-sky-400 via-blue-500 to-indigo-600",
-    shadow: "rgba(79,70,229,0.28)",
-    glow: "rgba(56,189,248,0.55)",
-  },
-  listening: {
-    gradient: "from-emerald-400 via-emerald-500 to-emerald-600",
-    shadow: "rgba(16,185,129,0.28)",
-    glow: "rgba(52,211,153,0.6)",
-  },
-  sending: {
-    gradient: "from-amber-400 via-amber-500 to-amber-600",
-    shadow: "rgba(245,158,11,0.28)",
-    glow: "rgba(251,191,36,0.6)",
-  },
-  thinking: {
-    gradient: "from-violet-400 via-violet-500 to-violet-600",
-    shadow: "rgba(139,92,246,0.28)",
-    glow: "rgba(167,139,250,0.6)",
-  },
-  speaking: {
-    gradient: "from-purple-400 via-purple-500 to-purple-600",
-    shadow: "rgba(139,92,246,0.28)",
-    glow: "rgba(192,132,252,0.6)",
-  },
-  error: {
-    gradient: "from-rose-400 via-red-500 to-red-600",
-    shadow: "rgba(239,68,68,0.24)",
-    glow: "rgba(251,113,133,0.55)",
-  },
-};
-
 const PHASE_LABELS = {
   idle: "Hold to talk",
   listening: "Listening...",
@@ -121,23 +87,8 @@ export default function App() {
   const [memoryLoading, setMemoryLoading] = useState(false);
   const [memoryError, setMemoryError] = useState(null);
   const [talkMode, setTalkMode] = useState("hold"); // "hold" | "tap"
-  const [activeTab, setActiveTab] = useState("chat"); // "chat" | "opencode" | "memory"
-  const [unreadChatCount, setUnreadChatCount] = useState(0);
-  const prevChatLengthRef = useRef(0);
-
-  useEffect(() => {
-    if (activeTab === "chat") {
-      setUnreadChatCount(0);
-      prevChatLengthRef.current = chat.length;
-    } else {
-      if (chat.length > prevChatLengthRef.current) {
-        setUnreadChatCount(
-          (c) => c + (chat.length - prevChatLengthRef.current),
-        );
-      }
-      prevChatLengthRef.current = chat.length;
-    }
-  }, [chat, activeTab]);
+  const [activeTab, setActiveTab] = useState("orchestration"); // "orchestration" | "memory"
+  const [textInput, setTextInput] = useState("");
 
   const socketRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -242,8 +193,26 @@ export default function App() {
 
   const clearChatHistory = useCallback(() => {
     setChat([]);
-    setStatus("History cleared. Hold the button and speak.");
+    setStatus("History cleared. Type a message or use the microphone.");
   }, []);
+
+  const sendTextMessage = useCallback(
+    (event) => {
+      event?.preventDefault();
+      const text = textInput.trim();
+      if (!text) return;
+      if (socketRef.current?.readyState !== WebSocket.OPEN) {
+        setStatus("Connecting...");
+        connectSocket();
+        return;
+      }
+      setTextInput("");
+      setStatus("Thinking...");
+      setPhase("thinking");
+      socketRef.current.send(JSON.stringify({ type: "text", text }));
+    },
+    [textInput],
+  );
 
   const scheduleReconnect = useCallback(() => {
     clearReconnectTimer();
@@ -794,7 +763,6 @@ export default function App() {
     };
   }, [syncOpenCodeSnapshot]);
 
-  const style = PHASE_STYLES[phase] || PHASE_STYLES.idle;
   const label =
     phase === "idle"
       ? isRecordingRef.current
@@ -802,74 +770,44 @@ export default function App() {
         : "Hold to talk"
       : PHASE_LABELS[phase] || phase;
 
-  const connDot = connected
-    ? { bg: "#34d399", ring: "rgba(52,211,153,0.6)", text: "text-emerald-300" }
-    : connectionState === "Connecting"
-      ? { bg: "#fbbf24", ring: "rgba(251,191,36,0.6)", text: "text-amber-300" }
-      : { bg: "#fb7185", ring: "rgba(251,113,133,0.6)", text: "text-rose-300" };
-
-  const showReconnect = !connected && hasConnectedRef.current;
-
   return (
-    <div className="h-screen w-full bg-bg-100 text-gray-1000 flex flex-col font-sans overflow-hidden select-none selection:bg-accent-blue/30">
+    <div className="h-screen w-full bg-zinc-950 text-white flex flex-col font-sans overflow-hidden select-none selection:bg-sky-500/30">
       {/* Modern Top Navbar */}
-      <header className="h-14 shrink-0 border-b border-white/10 bg-bg-100/80 backdrop-blur-md px-6 flex items-center justify-between z-10">
+      <header className="h-14 shrink-0 border-b border-white/10 bg-zinc-950/80 backdrop-blur-md px-6 flex items-center justify-between z-10">
         <div className="flex items-center gap-3">
-          <div className="h-4 w-4 rounded-full bg-gray-1000 flex items-center justify-center shadow-[0_0_12px_rgba(255,255,255,0.3)]">
-            <div className="h-1.5 w-1.5 bg-bg-100 rounded-full" />
+          <div className="h-4 w-4 rounded-md bg-zinc-9000 flex items-center justify-center shadow-sm">
+            <div className="h-1.5 w-1.5 bg-zinc-950 rounded-md" />
           </div>
-          <h1 className="text-[14px] font-semibold tracking-tight">
-            SpeakBro{" "}
-            <span className="text-gray-800 font-normal ml-1 border border-white/10 px-1.5 py-0.5 rounded text-[10px]">
-              v1.2
-            </span>
-          </h1>
+          <h1 className="text-sm font-semibold tracking-tight">SpeakBro</h1>
         </div>
 
         {/* Center Tabs */}
-        <div className="hidden md:flex items-center gap-1 bg-white/5 p-1 rounded-full border border-white/5">
-          {["chat", "opencode", "memory"].map((tab) => (
+        <div className="hidden md:flex items-center gap-1 bg-white/5 p-1 rounded-md border border-white/5">
+          {["orchestration", "memory"].map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`relative px-4 py-1.5 rounded-full text-[12px] font-medium transition-all duration-300 capitalize cursor-pointer ${
+              className={`relative px-4 py-1.5 rounded-md text-sm font-medium transition-all duration-300 capitalize cursor-pointer ${
                 activeTab === tab
                   ? "bg-white text-black shadow-sm"
-                  : "text-gray-800 hover:text-white hover:bg-white/5"
+                  : "text-zinc-400 hover:text-white hover:bg-white/5"
               }`}>
               {tab}
-              {tab === "chat" && unreadChatCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 h-3.5 w-3.5 bg-accent-blue text-white rounded-full text-[9px] flex items-center justify-center font-bold">
-                  {unreadChatCount}
-                </span>
-              )}
             </button>
           ))}
         </div>
 
         <div className="flex items-center gap-4">
-          <div className="flex bg-white/5 border border-white/10 p-0.5 rounded-lg text-[11px] font-medium">
-            <button
-              onClick={() => setTalkMode("hold")}
-              className={`px-3 py-1 rounded-md transition-all duration-200 cursor-pointer ${talkMode === "hold" ? "bg-white/15 text-white" : "text-gray-800 hover:text-white"}`}>
-              Hold
-            </button>
-            <button
-              onClick={() => setTalkMode("tap")}
-              className={`px-3 py-1 rounded-md transition-all duration-200 cursor-pointer ${talkMode === "tap" ? "bg-white/15 text-white" : "text-gray-800 hover:text-white"}`}>
-              Tap
-            </button>
-          </div>
           <div className="flex items-center gap-2">
             <span className="relative flex h-2 w-2">
               {connected && (
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-emerald opacity-75" />
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-md bg-emerald-500 opacity-75" />
               )}
               <span
-                className={`relative inline-flex rounded-full h-2 w-2 ${connected ? "bg-accent-emerald" : connectionState === "Connecting" ? "bg-accent-amber" : "bg-accent-rose"}`}
+                className={`relative inline-flex rounded-md h-2 w-2 ${connected ? "bg-emerald-500" : connectionState === "Connecting" ? "bg-amber-500" : "bg-rose-500"}`}
               />
             </span>
-            <span className="text-[12px] font-medium text-gray-800">
+            <span className="text-sm font-medium text-zinc-400">
               {connectionState}
             </span>
           </div>
@@ -877,194 +815,36 @@ export default function App() {
       </header>
 
       {/* Main Layout */}
-      <main className="flex-1 flex overflow-hidden p-6 gap-6 max-w-[1400px] w-full mx-auto max-md:flex-col max-md:p-4">
-        {/* Left Sidebar (Assistant) */}
-        <aside className="w-full md:w-[320px] flex flex-col gap-4 shrink-0">
-          <div className="geist-panel rounded-2xl p-6 flex flex-col flex-1 relative overflow-hidden group">
-            {/* Subtle background glow based on phase */}
-            <div
-              className="absolute inset-0 opacity-15 transition-all duration-700 pointer-events-none"
-              style={{
-                background:
-                  phase === "listening"
-                    ? "radial-gradient(circle at center, var(--color-accent-emerald) 0%, transparent 70%)"
-                    : phase === "speaking"
-                      ? "radial-gradient(circle at center, var(--color-accent-purple) 0%, transparent 70%)"
-                      : phase === "thinking"
-                        ? "radial-gradient(circle at center, var(--color-accent-blue) 0%, transparent 70%)"
-                        : "transparent",
-              }}
-            />
-
-            {showReconnect && (
-              <div className="mb-4 flex items-center justify-center gap-2 rounded-lg border border-accent-amber/20 bg-accent-amber/10 px-3 py-2 text-[11px] font-medium text-accent-amber animate-in">
-                <span className="h-1.5 w-1.5 rounded-full bg-accent-amber animate-pulse" />
-                Reconnecting...
-              </div>
-            )}
-
-            <div className="flex-1 flex flex-col items-center justify-center py-4 relative z-10">
-              <div className="relative w-28 h-28 flex items-center justify-center mb-8">
-                {/* Avatar with pulse ring */}
-                {(phase === "listening" || phase === "speaking") && (
-                  <div className="absolute inset-0 rounded-full animate-pulse-slow border border-white/20 scale-125" />
-                )}
-                <div className="relative z-10 w-full h-full transition-transform duration-300 hover:scale-105">
-                  <PixelAvatar
-                    phase={phase}
-                    voiceLevel={voiceLevel}
-                    className="w-full h-full"
-                  />
-                </div>
-              </div>
-
-              {/* Status and Visualizer */}
-              <div className="flex flex-col items-center gap-4 w-full">
-                <div className="h-8 flex items-end justify-center gap-[3px] w-full max-w-[160px]">
-                  {[...Array(12)].map((_, i) => {
-                    const active =
-                      phase === "listening" || phase === "speaking";
-                    const multiplier = 1 + Math.sin((i / 12) * Math.PI) * 2;
-                    const level = active
-                      ? Math.max(
-                          10,
-                          Math.min(100, voiceLevel * multiplier * 1.5),
-                        )
-                      : 2 + Math.sin(Date.now() / 300 + i) * 50;
-                    return (
-                      <div
-                        key={i}
-                        className="w-1 rounded-full transition-all duration-100 opacity-90"
-                        style={{
-                          height: `${level}%`,
-                          backgroundColor:
-                            phase === "listening"
-                              ? "var(--color-accent-emerald)"
-                              : phase === "speaking"
-                                ? "var(--color-accent-purple)"
-                                : "var(--color-gray-800)",
-                        }}
-                      />
-                    );
-                  })}
-                </div>
-                <div className="text-[13px] font-medium text-gray-900 tracking-wide mt-2 min-h-[20px]">
-                  {status}
-                </div>
-              </div>
-            </div>
-
-            <div className="mt-auto relative z-10 flex flex-col gap-3">
-              {micError && (
-                <div className="rounded-xl border border-accent-rose/20 bg-accent-rose/10 p-3 text-center animate-in">
-                  <div className="text-[12px] font-semibold text-accent-rose">
-                    Microphone Error
-                  </div>
-                  <div className="mt-1 text-[11px] text-accent-rose/80">
-                    {micError}
-                  </div>
-                  <button
-                    onClick={() => {
-                      setMicError(null);
-                      startRecording();
-                    }}
-                    className="mt-2 text-[11px] font-semibold text-white bg-white/10 px-3 py-1.5 rounded-lg hover:bg-white/20 transition cursor-pointer">
-                    Retry
-                  </button>
-                </div>
-              )}
-
-              <button
-                onPointerDown={handlePointerDown}
-                onPointerUp={handlePointerUp}
-                onPointerCancel={handlePointerUp}
-                className="w-full rounded-xl py-3.5 text-[13px] font-semibold transition-all duration-200 cursor-pointer active:scale-[0.98] select-none touch-none shadow-[0_0_20px_rgba(255,255,255,0.05)] border"
-                style={{
-                  backgroundColor:
-                    phase === "listening"
-                      ? "var(--color-accent-emerald)"
-                      : phase === "speaking"
-                        ? "var(--color-bg-200)"
-                        : phase === "error"
-                          ? "var(--color-accent-rose)"
-                          : "var(--color-gray-1000)",
-                  color:
-                    phase === "listening" || phase === "error"
-                      ? "#ffffff"
-                      : phase === "speaking"
-                        ? "var(--color-gray-1000)"
-                        : "#000000",
-                  borderColor:
-                    phase === "speaking"
-                      ? "rgba(255,255,255,0.2)"
-                      : "transparent",
-                }}>
-                <div className="flex items-center justify-center gap-2">
-                  <span>
-                    {phase === "idle"
-                      ? talkMode === "hold"
-                        ? "Hold to Speak"
-                        : "Tap to Speak"
-                      : phase === "speaking"
-                        ? talkMode === "hold"
-                          ? "Hold to Speak"
-                          : "Tap to Interrupt"
-                        : label}
-                  </span>
-                </div>
-              </button>
-
-              {opencodeSnapshot?.config?.model && (
-                <div className="text-[10px] text-gray-800 text-center font-mono uppercase tracking-widest mt-1 opacity-60">
-                  {opencodeSnapshot.config.model}
-                </div>
-              )}
-            </div>
-          </div>
-        </aside>
-
-        {/* Right Content Area */}
-        <main className="flex-1 flex flex-col min-h-0 relative">
-          {/* Mobile Tabs */}
-          <div className="md:hidden flex items-center gap-2 mb-4 bg-white/5 p-1 rounded-xl border border-white/10">
-            {["chat", "opencode", "memory"].map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`flex-1 py-2 rounded-lg text-[12px] font-medium capitalize ${activeTab === tab ? "bg-white text-black" : "text-gray-800 hover:text-white"}`}>
-                {tab}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex-1 geist-panel rounded-2xl overflow-hidden flex flex-col">
-            {activeTab === "chat" && (
-              <div className="flex flex-col h-full animate-fade-in">
-                <div className="flex items-center justify-between p-4 border-b border-white/5 shrink-0 bg-bg-200/50">
-                  <h2 className="text-[13px] font-semibold text-white tracking-wide">
+      <main className="overflow-hidden flex flex-1 max-w-7xl w-full mx-auto">
+        <div className="flex-1 overflow-hidden flex flex-col">
+          {activeTab === "orchestration" && (
+            <div className="flex h-full min-h-0 flex-col md:flex-row animate-in">
+              <div className="flex min-w-0 flex-1 flex-col border-r border-white/5">
+                <div className="flex items-center justify-between p-2 px-4 border-b border-white/5 shrink-0 bg-zinc-900/50">
+                  <h2 className="text-sm font-semibold text-white tracking-wide">
                     Transcript
                   </h2>
                   <button
                     onClick={clearChatHistory}
                     disabled={chat.length === 0}
-                    className="text-[11px] font-medium text-gray-800 hover:text-white disabled:opacity-50 transition cursor-pointer bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/5">
+                    className="text-xs font-medium text-zinc-400 hover:text-white disabled:opacity-50 transition cursor-pointer bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/5">
                     Clear
                   </button>
                 </div>
                 <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6">
                   {chat.length === 0 ? (
-                    <div className="flex flex-1 items-center justify-center text-[13px] text-gray-800">
+                    <div className="flex flex-1 items-center justify-center text-sm text-zinc-400">
                       No interactions yet. Start speaking.
                     </div>
                   ) : (
                     chat.map((t) => (
                       <div
                         key={t.id}
-                        className={`flex w-full animate-fade-in ${t.role === "user" ? "justify-end" : "justify-start"}`}>
+                        className={`flex w-full animate-in ${t.role === "user" ? "justify-end" : "justify-start"}`}>
                         <div
-                          className={`max-w-[85%] rounded-2xl px-5 py-4 ${t.role === "user" ? "bg-white text-black rounded-tr-sm shadow-md" : "bg-bg-200 border border-white/10 text-gray-900 rounded-tl-sm"}`}>
+                          className={`max-w-xl rounded-lg px-5 py-4 ${t.role === "user" ? "bg-white text-black rounded-tr-sm shadow-md" : "bg-zinc-900 border border-white/10 text-zinc-200 rounded-tl-sm"}`}>
                           <div
-                            className={`text-[10px] font-medium mb-1.5 opacity-60 flex items-center gap-2 ${t.role === "user" ? "text-gray-800 justify-end" : "text-gray-800"}`}>
+                            className={`text-xs font-medium mb-1.5 opacity-60 flex items-center gap-2 ${t.role === "user" ? "text-zinc-400 justify-end" : "text-zinc-400"}`}>
                             {t.prefix}
                             {t.ts && (
                               <span>
@@ -1076,7 +856,7 @@ export default function App() {
                               </span>
                             )}
                           </div>
-                          <div className="text-[14px] leading-relaxed break-words font-sans">
+                          <div className="text-sm leading-relaxed break-words font-sans">
                             <Streamdown>{t.text}</Streamdown>
                           </div>
                         </div>
@@ -1085,11 +865,44 @@ export default function App() {
                   )}
                   <div ref={chatEndRef} />
                 </div>
+                <form
+                  onSubmit={sendTextMessage}
+                  className="flex items-center gap-2 border-t border-white/5 bg-zinc-900/50 p-2.5">
+                  <input
+                    value={textInput}
+                    onChange={(e) => setTextInput(e.target.value)}
+                    placeholder="Message SpeakBro..."
+                    className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white outline-none placeholder:text-zinc-400 focus:border-sky-500/50"
+                  />
+                  <button
+                    type="button"
+                    onPointerDown={handlePointerDown}
+                    onPointerUp={handlePointerUp}
+                    onPointerCancel={handlePointerUp}
+                    aria-label="Use voice"
+                    title="Use voice"
+                    className={`flex h-10 shrink-0 items-center gap-2 rounded-lg border px-2.5 text-xs font-medium transition active:scale-95 touch-none cursor-pointer ${phase === "listening" ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-400" : phase === "error" ? "border-rose-500/40 bg-rose-500/15 text-rose-400" : phase === "thinking" || phase === "transcribing" || phase === "sending" ? "border-amber-500/40 bg-amber-500/15 text-amber-400" : "border-sky-500/30 bg-sky-500/10 text-sky-400 hover:bg-sky-500/20"}`}>
+                    <svg
+                      viewBox="0 0 24 24"
+                      className="h-4 w-4"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      aria-hidden="true">
+                      <rect x="8" y="3" width="8" height="12" rx="4" />
+                      <path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" />
+                    </svg>
+                    <span>{phase === "idle" ? "Voice" : label}</span>
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!textInput.trim()}
+                    className="rounded-lg bg-white px-3.5 py-2.5 text-xs font-semibold text-black transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-40">
+                    Send
+                  </button>
+                </form>
               </div>
-            )}
-
-            {activeTab === "opencode" && (
-              <div className="animate-fade-in h-full flex flex-col">
+              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 <OpenCodePanel
                   snapshot={opencodeSnapshot}
                   selectedSessionId={selectedSessionId}
@@ -1099,20 +912,20 @@ export default function App() {
                   onDeleteSession={removeOpenCodeSession}
                 />
               </div>
-            )}
+            </div>
+          )}
 
-            {activeTab === "memory" && (
-              <div className="animate-fade-in h-full flex flex-col">
-                <MemoryPanel
-                  events={memoryEvents}
-                  memories={memoryRecords}
-                  loading={memoryLoading}
-                  error={memoryError}
-                />
-              </div>
-            )}
-          </div>
-        </main>
+          {activeTab === "memory" && (
+            <div className="animate-in h-full flex flex-col">
+              <MemoryPanel
+                events={memoryEvents}
+                memories={memoryRecords}
+                loading={memoryLoading}
+                error={memoryError}
+              />
+            </div>
+          )}
+        </div>
       </main>
     </div>
   );

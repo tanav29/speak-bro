@@ -228,7 +228,7 @@ export function PixelAvatar({
       {/* SVG canvas */}
       <svg
         viewBox="0 0 24 24"
-        className="w-full h-full drop-shadow-[0_4px_12px_rgba(0,0,0,0.5)]"
+        className="w-full h-full drop-shadow-md"
         style={{ imageRendering: "pixelated" }}>
         {/* Antenna Pole */}
         <rect x="11" y="2" width="2" height="4" fill="#334155" />

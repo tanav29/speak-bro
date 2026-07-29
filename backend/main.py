@@ -1586,12 +1586,39 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         finally:
             current_turn_interrupt = None
 
+    async def process_text_turn(text: str) -> None:
+        """Run a typed message through the same agent pipeline as voice input."""
+        nonlocal current_turn_interrupt
+        current_turn_interrupt = threading.Event()
+        try:
+            await websocket.send_json({"type": "transcript", "text": text})
+            append_history(session_history, "user", text)
+            await websocket.send_json({"type": "status", "phase": "thinking", "message": "Thinking..."})
+            response = await generate_llm_response(session_history, websocket, websocket.selected_session_id)
+            if current_turn_interrupt.is_set():
+                return
+            append_history(session_history, "assistant", response)
+            await websocket.send_json({"type": "status", "phase": "speaking", "message": "Speaking the reply..."})
+            audio_bytes, audio_mime = await asyncio.to_thread(synthesize_audio, response, current_turn_interrupt)
+            if current_turn_interrupt.is_set():
+                return
+            await websocket.send_json({"type": "audio", "mime": audio_mime, "text": response})
+            await websocket.send_bytes(audio_bytes)
+            await websocket.send_json({"type": "status", "phase": "idle", "message": "Ready for the next turn."})
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            log_stage(logging.ERROR, "ws.text", "Typed turn failed: %s", exc, session_id=session_id, exc_info=True)
+            await websocket.send_json({"type": "error", "phase": "idle", "message": "Text turn failed."})
+        finally:
+            current_turn_interrupt = None
+
     try:
         await websocket.send_json(
             {
                 "type": "ready",
                 "phase": "idle",
-                "message": "Connected. Hold the button and speak.",
+                "message": "Connected. Type a message or use the microphone.",
             }
         )
     except Exception:
@@ -1646,7 +1673,16 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 session_id=session_id,
             )
 
-            if event_type == "start":
+            if event_type == "text":
+                text = str(payload.get("text", "")).strip()
+                if text:
+                    if current_turn_task is not None and not current_turn_task.done():
+                        if current_turn_interrupt is not None:
+                            current_turn_interrupt.set()
+                        current_turn_task.cancel()
+                    current_turn_task = asyncio.create_task(process_text_turn(text))
+
+            elif event_type == "start":
                 sample_rate = safe_sample_rate(
                     payload.get("sampleRate"), DEFAULT_SAMPLE_RATE
                 )
