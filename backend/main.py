@@ -70,6 +70,7 @@ SYSTEM_PROMPT = (
     "'selected session'. When you send a message or summarize, you may omit the session id to "
     "target the selected session automatically. If no session is selected and you omit the id, "
     "ask the user to select one or create a new session."
+    "dont send the full session id or some gibrish text to user in the last final text message part"
 )
 
 agent = Agent(
