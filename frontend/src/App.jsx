@@ -1,5 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Streamdown } from "streamdown";
+import { Button } from "./components/ui/button";
+import { Input } from "./components/ui/input";
+import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
 import { OpenCodePanel } from "./OpenCodePanel";
 import { MemoryPanel } from "./MemoryPanel";
 import { fetchMemories } from "./memoryApi";
@@ -771,31 +774,26 @@ export default function App() {
       : PHASE_LABELS[phase] || phase;
 
   return (
-    <div className="h-screen w-full bg-zinc-950 text-white flex flex-col font-sans overflow-hidden select-none selection:bg-sky-500/30">
+    <div className="flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-foreground selection:bg-white/20">
       {/* Modern Top Navbar */}
-      <header className="h-14 shrink-0 border-b border-white/10 bg-zinc-950/80 backdrop-blur-md px-6 flex items-center justify-between z-10">
+      <header className="z-10 flex h-14 shrink-0 items-center justify-between border-b border-white/10 bg-background/80 px-4 backdrop-blur-md sm:px-6">
         <div className="flex items-center gap-3">
-          <div className="h-4 w-4 rounded-md bg-zinc-9000 flex items-center justify-center shadow-sm">
-            <div className="h-1.5 w-1.5 bg-zinc-950 rounded-md" />
+          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-white text-zinc-950 shadow-sm">
+            <div className="h-2 w-2 rounded-sm bg-zinc-950" />
           </div>
-          <h1 className="text-sm font-semibold tracking-tight">SpeakBro</h1>
+          <div>
+            <h1 className="text-sm font-semibold tracking-tight">SpeakBro</h1>
+            <p className="hidden text-[11px] text-zinc-500 sm:block">Voice workspace</p>
+          </div>
         </div>
 
         {/* Center Tabs */}
-        <div className="hidden md:flex items-center gap-1 bg-white/5 p-1 rounded-md border border-white/5">
-          {["orchestration", "memory"].map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`relative px-4 py-1.5 rounded-md text-sm font-medium transition-all duration-300 capitalize cursor-pointer ${
-                activeTab === tab
-                  ? "bg-white text-black shadow-sm"
-                  : "text-zinc-400 hover:text-white hover:bg-white/5"
-              }`}>
-              {tab}
-            </button>
-          ))}
-        </div>
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList aria-label="Workspace views">
+            <TabsTrigger value="orchestration">Orchestration</TabsTrigger>
+            <TabsTrigger value="memory">Memory</TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
@@ -815,23 +813,24 @@ export default function App() {
       </header>
 
       {/* Main Layout */}
-      <main className="overflow-hidden flex flex-1 max-w-7xl w-full mx-auto">
+      <main className="mx-auto flex min-h-0 w-full max-w-[1400px] flex-1 overflow-hidden px-0 sm:px-4 sm:py-4">
         <div className="flex-1 overflow-hidden flex flex-col">
           {activeTab === "orchestration" && (
-            <div className="flex h-full min-h-0 flex-col md:flex-row animate-in">
-              <div className="flex min-w-0 flex-1 flex-col border-r border-white/5">
-                <div className="flex items-center justify-between p-2 px-4 border-b border-white/5 shrink-0 bg-zinc-900/50">
+            <div className="flex h-full min-h-0 flex-col gap-0 md:flex-row md:gap-4 animate-in">
+              <div className="panel flex min-h-0 min-w-0 flex-1 flex-col md:rounded-lg">
+                <div className="panel-header shrink-0 bg-white/[0.02]">
                   <h2 className="text-sm font-semibold text-white tracking-wide">
                     Transcript
                   </h2>
-                  <button
+                  <Button
                     onClick={clearChatHistory}
                     disabled={chat.length === 0}
-                    className="text-xs font-medium text-zinc-400 hover:text-white disabled:opacity-50 transition cursor-pointer bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-white/5">
+                    variant="ghost"
+                    size="sm">
                     Clear
-                  </button>
+                  </Button>
                 </div>
-                <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-6">
+                <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4 sm:p-6">
                   {chat.length === 0 ? (
                     <div className="flex flex-1 items-center justify-center text-sm text-zinc-400">
                       No interactions yet. Start speaking.
@@ -867,12 +866,12 @@ export default function App() {
                 </div>
                 <form
                   onSubmit={sendTextMessage}
-                  className="flex items-center gap-2 border-t border-white/5 bg-zinc-900/50 p-2.5">
-                  <input
+                  className="flex items-center gap-2 border-t border-white/10 bg-white/[0.02] p-3">
+                  <Input
                     value={textInput}
                     onChange={(e) => setTextInput(e.target.value)}
                     placeholder="Message SpeakBro..."
-                    className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/5 px-3 py-2.5 text-sm text-white outline-none placeholder:text-zinc-400 focus:border-sky-500/50"
+                    className="min-w-0 flex-1"
                   />
                   <button
                     type="button"
@@ -894,12 +893,9 @@ export default function App() {
                     </svg>
                     <span>{phase === "idle" ? "Voice" : label}</span>
                   </button>
-                  <button
-                    type="submit"
-                    disabled={!textInput.trim()}
-                    className="rounded-lg bg-white px-3.5 py-2.5 text-xs font-semibold text-black transition hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-40">
+                  <Button type="submit" disabled={!textInput.trim()} size="sm">
                     Send
-                  </button>
+                  </Button>
                 </form>
               </div>
               <div className="flex min-h-0 min-w-0 flex-1 flex-col">

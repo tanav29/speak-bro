@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import { Button } from "./components/ui/button";
 import {
   formatSessionTitle,
   formatStatusLabel,
@@ -376,9 +377,9 @@ export function OpenCodePanel({
   );
 
   return (
-    <section className="flex flex-1 h-full flex-col min-h-0 bg-zinc-900/50">
+    <section className="panel flex h-full min-h-0 flex-1 flex-col md:rounded-lg">
       {view === "detail" && detailSession ? (
-        <div className="p-3 overflow-y-auto h-full">
+        <div className="h-full overflow-y-auto p-4">
           <SessionDetail
             session={detailSession}
             onBack={closeDetail}
@@ -388,9 +389,9 @@ export function OpenCodePanel({
         </div>
       ) : (
         <>
-          <div className="flex items-center justify-between p-2 px-3 border-b border-white/10 shrink-0">
+          <div className="panel-header shrink-0">
             <div className="flex items-center gap-3 min-w-0">
-              <h2 className="text-sm font-semibold text-white tracking-wide shrink-0">
+              <h2 className="shrink-0 text-sm font-semibold text-white">
                 OpenCode
               </h2>
               {configInfo?.model && (
@@ -400,22 +401,16 @@ export function OpenCodePanel({
               )}
             </div>
             <div className="flex gap-2 shrink-0">
-              <button
-                className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-zinc-200 transition hover:bg-white/10 hover:text-white cursor-pointer shadow-sm"
-                onClick={onRefresh}
-                type="button">
+              <Button variant="secondary" size="sm" onClick={onRefresh}>
                 Refresh
-              </button>
-              <button
-                className="rounded-lg border border-sky-500/20 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-400 transition hover:bg-sky-500/20 cursor-pointer shadow-sm"
-                onClick={() => setComposing((v) => !v)}
-                type="button">
+              </Button>
+              <Button size="sm" onClick={() => setComposing((v) => !v)}>
                 + New
-              </button>
+              </Button>
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto flex flex-col gap-4">
+          <div className="flex-1 overflow-y-auto p-4">
             {!connected && (
               <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
                 OpenCode offline. Run terminal workspace service to sync active
@@ -463,7 +458,7 @@ export function OpenCodePanel({
               </div>
             )}
 
-            <div className="flex flex-col gap-3 flex-1 h-full overflow-y-auto">
+            <div className="flex h-full flex-1 flex-col gap-3 overflow-y-auto">
               {sessions.length ? (
                 <div className="flex min-h-0 flex-1 gap-2">
                   {["busy", "idle"].map((column) => {
@@ -496,7 +491,7 @@ export function OpenCodePanel({
                               return (
                                 <div
                                   key={session.id}
-                                  className={`border p-2 transition ${isActive ? "border-sky-500/40 bg-sky-500/10" : "border-white/10 bg-white/5 hover:bg-white/10"}`}>
+                                  className={`rounded-md border p-3 transition-colors ${isActive ? "border-white/30 bg-white/10" : "border-white/10 bg-white/[0.03] hover:bg-white/[0.06]"}`}>
                                   <div className="flex items-start justify-between gap-1">
                                     <button
                                       onClick={() => openDetail(session)}

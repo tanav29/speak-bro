@@ -3,11 +3,47 @@
 @theme {
   --font-sans: "Geist", "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, monospace;
+  --color-border: hsl(240 3.7% 15.9%);
+  --color-input: hsl(240 3.7% 15.9%);
+  --color-ring: hsl(240 4.9% 83.9%);
+  --color-background: hsl(240 10% 3.9%);
+  --color-foreground: hsl(0 0% 98%);
+  --color-muted: hsl(240 3.7% 15.9%);
+  --color-muted-foreground: hsl(240 5% 64.9%);
+  --color-accent: hsl(240 3.7% 15.9%);
+  --color-accent-foreground: hsl(0 0% 98%);
 }
 
 :root {
   color-scheme: dark;
 }
+
+@layer components {
+  .panel {
+    @apply border border-white/10 bg-zinc-950/70;
+  }
+
+  .panel-header {
+    @apply flex min-h-14 items-center justify-between border-b border-white/10 px-4;
+  }
+
+  .btn {
+    @apply inline-flex h-9 cursor-pointer items-center justify-center rounded-md border border-transparent px-3 text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50;
+  }
+
+  .btn-secondary {
+    @apply border-white/10 bg-white/5 text-zinc-200 hover:bg-white/10 hover:text-white;
+  }
+
+  .btn-primary {
+    @apply bg-white text-zinc-950 hover:bg-zinc-200;
+  }
+
+  .field {
+    @apply h-10 rounded-md border border-white/10 bg-transparent px-3 text-sm outline-none transition-colors placeholder:text-zinc-500 focus:border-white/30 focus:ring-2 focus:ring-white/10;
+  }
+}
+
 
 html,
 body,

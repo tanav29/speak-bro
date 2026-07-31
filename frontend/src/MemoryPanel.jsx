@@ -2,15 +2,15 @@ import { useMemo, useState } from "react";
 
 function Badge({ children, tone = "neutral" }) {
   const tones = {
-    neutral: "border-white/10 bg-white/5 text-slate-300",
-    good: "border-emerald-500/20 bg-emerald-500/8 text-emerald-300",
-    warning: "border-amber-500/20 bg-amber-500/8 text-amber-300",
-    danger: "border-rose-500/20 bg-rose-500/8 text-rose-300",
+    neutral: "border-white/10 bg-white/5 text-zinc-300",
+    good: "border-emerald-500/20 bg-emerald-500/10 text-emerald-300",
+    warning: "border-amber-500/20 bg-amber-500/10 text-amber-300",
+    danger: "border-rose-500/20 bg-rose-500/10 text-rose-300",
   };
 
   return (
     <span
-      className={`inline-flex items-center rounded border px-2 py-1 text-xs font-mono font-medium uppercase tracking-wider ${tones[tone] || tones.neutral}`}>
+      className={`inline-flex items-center rounded-md border px-2 py-1 text-[11px] font-medium ${tones[tone] || tones.neutral}`}>
       {children}
     </span>
   );
@@ -91,12 +91,12 @@ export function MemoryPanel({
   const hiddenCount = Math.max(0, memories.length - 10);
 
   return (
-    <section className="flex h-full w-full flex-col min-h-0 bg-zinc-900/50">
-      <div className="flex items-center justify-between p-4 border-b border-white/10 shrink-0">
+    <section className="panel flex h-full w-full min-h-0 flex-col md:rounded-lg">
+      <div className="panel-header shrink-0">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-white tracking-wide">Memory Bank</h2>
-          <div className="mt-1 text-xs text-zinc-400">
-            Durable knowledge dynamically saved by the agent.
+          <h2 className="text-sm font-semibold text-white">Memory bank</h2>
+          <div className="mt-1 text-xs text-zinc-500">
+            Durable knowledge saved by the agent.
           </div>
         </div>
         <div className="flex flex-wrap justify-end gap-2">
@@ -104,7 +104,7 @@ export function MemoryPanel({
         </div>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-6">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 sm:p-6">
         {loading && <div className="text-sm font-medium text-zinc-400 text-center">Syncing database...</div>}
 
         {error && (
@@ -118,7 +118,7 @@ export function MemoryPanel({
             {visibleMemories.map((memory) => (
               <div
                 key={memory.id}
-                className="rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 transition-all duration-200 px-4 py-3 shadow-sm">
+                className="rounded-md border border-white/10 bg-white/[0.03] px-4 py-3 transition-colors hover:bg-white/[0.06]">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-semibold text-white break-words">
@@ -180,7 +180,7 @@ export function MemoryPanel({
               events.map((event) => (
                 <div
                   key={event.id}
-                  className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 hover:bg-white/10 transition shadow-sm">
+                  className="rounded-md border border-white/10 bg-white/[0.03] px-4 py-3 transition-colors hover:bg-white/[0.06]">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-2">
                       <Badge tone={toneForAction(event.action)}>
