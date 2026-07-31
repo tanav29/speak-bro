@@ -1,5 +1,11 @@
 import { useState, useCallback, useEffect } from "react";
-import { Button } from "./components/ui/button";
+import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   formatSessionTitle,
   formatStatusLabel,
@@ -7,22 +13,7 @@ import {
   fetchSessionMessages,
   fetchSessionStatus,
 } from "./opencodeApi";
-
-function Badge({ children, tone = "neutral" }) {
-  const tones = {
-    neutral: "border-white/10 bg-white/5 text-slate-300",
-    good: "border-emerald-500/20 bg-emerald-500/8 text-emerald-400",
-    warning: "border-amber-500/20 bg-amber-500/8 text-amber-300",
-    danger: "border-rose-500/20 bg-rose-500/8 text-rose-400",
-  };
-
-  return (
-    <span
-      className={`inline-flex items-center rounded border px-2 py-1 text-xs font-mono font-medium uppercase tracking-wider ${tones[tone] || tones.neutral}`}>
-      {children}
-    </span>
-  );
-}
+import { Check, Copy, RotateCcw, Trash, X } from "lucide-react";
 
 function formatTime(value) {
   if (!value) return "\u2014";
@@ -61,15 +52,15 @@ function statusKind(status) {
 
 function statusTone(status) {
   const label = formatStatusLabel(status).toLowerCase();
-  if (label.includes("error") || label.includes("failed")) return "danger";
+  if (label.includes("error") || label.includes("failed")) return "destructive";
   if (
     label.includes("busy") ||
     label.includes("running") ||
     label.includes("active")
   )
-    return "good";
+    return "default";
   if (label.includes("retry")) return "warning";
-  return "neutral";
+  return "secondary";
 }
 
 function CopyButton({ text }) {
@@ -99,13 +90,16 @@ function CopyButton({ text }) {
   );
 
   return (
-    <button
-      onClick={handleCopy}
-      className="rounded border border-white/10 bg-white/5 px-2 py-1 text-xs font-mono font-medium uppercase tracking-wider text-slate-400 transition hover:bg-white/10 hover:text-white active:scale-95"
-      type="button"
-      title="Copy session ID">
-      {copied ? "\u2713" : "ID"}
-    </button>
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger>
+          <button onClick={handleCopy} type="button" title="Copy session ID">
+            <Copy className="w-3 h-3" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent>Copy session ID</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 
@@ -158,13 +152,13 @@ function SessionDetail({ session, onBack, onDelete, deleting }) {
   const diffs = s.summary?.diffs ?? [];
 
   return (
-    <div className="flex h-full flex-col gap-2 animate-slide-in">
+    <div className="flex h-full flex-col gap-2">
       <div className="flex items-center gap-2">
         <button
           onClick={onBack}
           className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs font-bold uppercase tracking-wider text-slate-400 transition hover:bg-white/10 hover:text-white active:scale-95"
           type="button">
-          {"← Back"}
+          {"\u2190 Back"}
         </button>
         <span className="truncate text-xs font-semibold text-white">
           {formatSessionTitle(s)}
@@ -172,9 +166,6 @@ function SessionDetail({ session, onBack, onDelete, deleting }) {
       </div>
 
       <div className="grid grid-cols-2 gap-2 text-xs text-slate-400">
-        {/* <SessionField label="Project ID" span>{s.projectID || "—"}</SessionField>
-        <SessionField label="Version">{s.version || "—"}</SessionField> */}
-        {/* <SessionField label="Parent ID">{s.parentID || "—"}</SessionField> */}
         <SessionField label="Created">
           {formatTime(s.time?.created)}
         </SessionField>
@@ -187,7 +178,7 @@ function SessionDetail({ session, onBack, onDelete, deleting }) {
           </SessionField>
         ) : null}
         <SessionField label="Directory" span>
-          {s.directory || "—"}
+          {s.directory || "\u2014"}
         </SessionField>
         {s.revert?.messageID && (
           <SessionField label="Revert" span>
@@ -211,8 +202,8 @@ function SessionDetail({ session, onBack, onDelete, deleting }) {
         )}
         {s.summary && (
           <span className="text-xs text-emerald-400/70">
-            +{s.summary.additions}/-{s.summary.deletions} · {s.summary.files}{" "}
-            files
+            +{s.summary.additions}/-{s.summary.deletions} \u00b7{" "}
+            {s.summary.files} files
           </span>
         )}
         <button
@@ -248,7 +239,7 @@ function SessionDetail({ session, onBack, onDelete, deleting }) {
         </details>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto log-body">
+      <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-auto scrollbar-thin">
         {messages === null ? (
           <div className="flex flex-1 items-center justify-center text-xs text-slate-500">
             Loading transcript...
@@ -305,8 +296,6 @@ export function OpenCodePanel({
   const connected = snapshot?.connected;
   const [liveStatus, setLiveStatus] = useState(sessionStatus);
 
-  // Keep this deliberately independent from the full snapshot: status is cheap to
-  // poll and gives the board a responsive feel even when no SSE event arrives.
   useEffect(() => {
     setLiveStatus(sessionStatus);
   }, [snapshot?.sessionStatus]);
@@ -377,7 +366,7 @@ export function OpenCodePanel({
   );
 
   return (
-    <section className="panel flex h-full min-h-0 flex-1 flex-col md:rounded-lg">
+    <section className="panel flex h-full min-h-0 flex-1 flex-col">
       {view === "detail" && detailSession ? (
         <div className="h-full overflow-y-auto p-4">
           <SessionDetail
@@ -401,16 +390,13 @@ export function OpenCodePanel({
               )}
             </div>
             <div className="flex gap-2 shrink-0">
-              <Button variant="secondary" size="sm" onClick={onRefresh}>
-                Refresh
-              </Button>
-              <Button size="sm" onClick={() => setComposing((v) => !v)}>
-                + New
+              <Button variant="outline" size="icon" onClick={onRefresh}>
+                <RotateCcw />
               </Button>
             </div>
           </div>
 
-          <div className="flex-1 overflow-y-auto p-4">
+          <div className="flex-1 overflow-y-auto">
             {!connected && (
               <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
                 OpenCode offline. Run terminal workspace service to sync active
@@ -424,41 +410,7 @@ export function OpenCodePanel({
               </div>
             )}
 
-            {composing && (
-              <div className="flex items-center gap-3 animate-in rounded-lg border border-sky-500/20 bg-sky-500/10 px-4 py-3 shadow-sm">
-                <input
-                  autoFocus
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void handleCreate();
-                    if (e.key === "Escape") {
-                      setComposing(false);
-                      setNewTitle("");
-                    }
-                  }}
-                  placeholder="Workspace/Session Title..."
-                  className="min-w-0 flex-1 bg-transparent text-sm text-white placeholder:text-zinc-400 outline-none"
-                />
-                <button
-                  onClick={handleCreate}
-                  className="rounded-lg bg-sky-500 text-white px-3 py-1.5 text-xs font-semibold transition hover:opacity-90 cursor-pointer shadow-sm"
-                  type="button">
-                  Create
-                </button>
-                <button
-                  onClick={() => {
-                    setComposing(false);
-                    setNewTitle("");
-                  }}
-                  className="rounded-lg px-2 py-1.5 text-sm text-zinc-400 transition hover:text-white cursor-pointer"
-                  type="button">
-                  ✕
-                </button>
-              </div>
-            )}
-
-            <div className="flex h-full flex-1 flex-col gap-3 overflow-y-auto">
+            <div className="flex h-full flex-1 flex-col p-4">
               {sessions.length ? (
                 <div className="flex min-h-0 flex-1 gap-2">
                   {["busy", "idle"].map((column) => {
@@ -482,20 +434,24 @@ export function OpenCodePanel({
                             {columnSessions.length}
                           </span>
                         </div>
-                        <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pr-0.5">
+                        <div className="flex-1 overflow-y-auto space-y-2">
                           {columnSessions.length ? (
                             columnSessions.map((session) => {
                               const isActive = session.id === selectedSessionId;
-                              const status = liveStatus[session.id];
                               const confirming = confirmingId === session.id;
+
                               return (
                                 <div
                                   key={session.id}
-                                  className={`rounded-md border p-3 transition-colors ${isActive ? "border-white/30 bg-white/10" : "border-white/10 bg-white/[0.03] hover:bg-white/[0.06]"}`}>
+                                  className={`rounded-lg p-3 transition-colors ${
+                                    isActive
+                                      ? "border-white/30 bg-white/10"
+                                      : "border-white/10 bg-white/[0.03] hover:bg-white/[0.06]"
+                                  }`}>
                                   <div className="flex items-start justify-between gap-1">
                                     <button
                                       onClick={() => openDetail(session)}
-                                      className="min-w-0 truncate text-left text-xs font-semibold text-white hover:text-sky-400"
+                                      className="min-w-0 truncate text-left text-xs font-bold text-white cursor-pointer"
                                       type="button"
                                       title={formatSessionTitle(session)}>
                                       {formatSessionTitle(session)}
@@ -504,7 +460,7 @@ export function OpenCodePanel({
                                   </div>
                                   <div className="mt-1 flex items-center gap-1 text-xs text-zinc-400">
                                     <span className="truncate font-mono">
-                                      {session.directory || "No directory"}
+                                      {session.directory.split().pop()}
                                     </span>
                                     <span className="ml-auto shrink-0">
                                       {formatRelativeTime(
@@ -520,9 +476,13 @@ export function OpenCodePanel({
                                           isActive ? null : session.id,
                                         )
                                       }
-                                      className={`rounded border px-2 py-1 text-xs font-semibold ${isActive ? "border-sky-500/40 bg-sky-500 text-white" : "border-white/10 text-zinc-200 hover:text-white"}`}
+                                      className={`rounded-md border p-1 font-semibold ${
+                                        isActive
+                                          ? "border-sky-500/40 bg-sky-500 text-white"
+                                          : "border-white/10 text-zinc-200 hover:text-white"
+                                      }`}
                                       type="button">
-                                      {isActive ? "Selected" : "Select"}
+                                      <Check className="w-3 h-3" />
                                     </button>
                                     {session.summary && (
                                       <span className="text-xs text-emerald-400/80">
@@ -538,13 +498,13 @@ export function OpenCodePanel({
                                           }
                                           className="ml-auto text-xs text-rose-400"
                                           type="button">
-                                          Confirm
+                                          <Check className="w-3 h-3" />
                                         </button>
                                         <button
                                           onClick={() => setConfirmingId(null)}
                                           className="text-xs text-zinc-400"
                                           type="button">
-                                          ×
+                                          <X className="w-3 h-3" />
                                         </button>
                                       </>
                                     ) : (
@@ -554,7 +514,7 @@ export function OpenCodePanel({
                                         }
                                         className="ml-auto text-xs text-zinc-400 hover:text-rose-400"
                                         type="button">
-                                        Delete
+                                        <Trash className="w-3 h-3" />
                                       </button>
                                     )}
                                   </div>

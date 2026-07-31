@@ -12,6 +12,7 @@ import {
   deleteSession,
   opencodeUrl,
 } from "./opencodeApi";
+import { ChevronDown, Mic } from "lucide-react";
 
 const TARGET_SAMPLE_RATE = 16000;
 const MAX_TRANSCRIPTS = 12;
@@ -92,6 +93,7 @@ export default function App() {
   const [talkMode, setTalkMode] = useState("hold"); // "hold" | "tap"
   const [activeTab, setActiveTab] = useState("orchestration"); // "orchestration" | "memory"
   const [textInput, setTextInput] = useState("");
+  const [projectDirectory, setProjectDirectory] = useState("");
 
   const socketRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -119,6 +121,26 @@ export default function App() {
     }
   }, []);
 
+  const chooseProjectDirectory = useCallback(async () => {
+    // The browser deliberately hides absolute filesystem paths. Ask the local
+    // backend to open a native folder dialog so OpenCode gets the real path.
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: "choose_project_directory" }));
+      setStatus("Choose a project directory...");
+      return;
+    }
+    setStatus("Connecting...");
+    connectSocket();
+    window.setTimeout(() => {
+      if (socketRef.current?.readyState === WebSocket.OPEN) {
+        socketRef.current.send(JSON.stringify({ type: "choose_project_directory" }));
+        setStatus("Choose a project directory...");
+      } else {
+        setStatus("Backend connection is unavailable.");
+      }
+    }, 700);
+  }, []);
+
   const syncOpenCodeSnapshot = useCallback(async () => {
     try {
       const data = await fetchSnapshot();
@@ -128,7 +150,7 @@ export default function App() {
         ...(prev ?? {}),
         connected: false,
         loading: false,
-        error: error.message,
+        error: error instanceof Error ? error.message : String(error),
       }));
     }
   }, []);
@@ -165,7 +187,7 @@ export default function App() {
           ...(prev ?? {}),
           connected: false,
           loading: false,
-          error: error.message,
+          error: error instanceof Error ? error.message : String(error),
         }));
       }
     },
@@ -180,7 +202,7 @@ export default function App() {
       } catch (error) {
         setOpencodeSnapshot((prev) => ({
           ...(prev ?? {}),
-          error: error.message,
+          error: error instanceof Error ? error.message : String(error),
         }));
       }
     },
@@ -333,7 +355,9 @@ export default function App() {
       }
 
       const audioContext = new (
-        window.AudioContext || window.webkitAudioContext
+        window.AudioContext ||
+        (window as Window & { webkitAudioContext?: typeof AudioContext })
+          .webkitAudioContext!
       )();
       const sourceNode = audioContext.createMediaStreamSource(stream);
       const processorNode = audioContext.createScriptProcessor(4096, 1, 1);
@@ -377,7 +401,10 @@ export default function App() {
       );
     } catch (error) {
       await stopRecording(false);
-      const msg = error?.message || "Microphone access was blocked.";
+      const msg =
+        error instanceof Error
+          ? error.message
+          : "Microphone access was blocked.";
       setMicError(msg);
       setStatus(`Mic error: ${msg}`);
       setPhase("error");
@@ -482,49 +509,6 @@ export default function App() {
   }, [talkMode, stopRecording]);
 
   useEffect(() => {
-    const keyDown = (e) => {
-      if (e.code === "Space" && !e.repeat) {
-        e.preventDefault();
-        if (talkMode === "hold") {
-          isHoldingRef.current = true;
-        }
-        if (phase === "speaking") {
-          interruptSpeaking();
-          if (talkMode === "hold") {
-            startRecording();
-          }
-          return;
-        }
-        if (talkMode === "tap") {
-          if (isRecordingRef.current) {
-            stopRecording();
-          } else {
-            startRecording();
-          }
-        } else {
-          if (!isRecordingRef.current) startRecording();
-        }
-      }
-    };
-    const keyUp = (e) => {
-      if (e.code === "Space") {
-        if (talkMode === "hold") {
-          isHoldingRef.current = false;
-          if (isRecordingRef.current) {
-            stopRecording();
-          }
-        }
-      }
-    };
-    window.addEventListener("keydown", keyDown);
-    window.addEventListener("keyup", keyUp);
-    return () => {
-      window.removeEventListener("keydown", keyDown);
-      window.removeEventListener("keyup", keyUp);
-    };
-  }, [phase, talkMode, interruptSpeaking, startRecording, stopRecording]);
-
-  useEffect(() => {
     if (chatEndRef.current) {
       chatEndRef.current.scrollIntoView({ behavior: "smooth", block: "end" });
     }
@@ -552,6 +536,14 @@ export default function App() {
       setConnected(true);
       setStatus("Ready. Hold the button and speak.");
       setPhase("idle");
+      if (projectDirectory) {
+        socket.send(
+          JSON.stringify({
+            type: "set_project_directory",
+            directory: projectDirectory,
+          }),
+        );
+      }
       if (selectedSessionIdRef.current) {
         socket.send(
           JSON.stringify({
@@ -615,6 +607,15 @@ export default function App() {
         if (payload.type === "error") {
           setStatus(payload.message || "Something went wrong.");
           setPhase("error");
+          return;
+        }
+        if (payload.type === "project_directory") {
+          setProjectDirectory(payload.directory || "");
+          setStatus(
+            payload.directory
+              ? `Project: ${payload.directory}`
+              : "No project directory selected.",
+          );
           return;
         }
         if (payload.type === "opencode_session") {
@@ -774,27 +775,22 @@ export default function App() {
       : PHASE_LABELS[phase] || phase;
 
   return (
-    <div className="flex h-dvh w-full flex-col overflow-hidden bg-background font-sans text-foreground selection:bg-white/20">
+    <div className="flex h-dvh w-full overflow-hidden font-sans">
       {/* Modern Top Navbar */}
-      <header className="z-10 flex h-14 shrink-0 items-center justify-between border-b border-white/10 bg-background/80 px-4 backdrop-blur-md sm:px-6">
+      <header className="z-10 flex flex-col py-4 shrink-0 items-center justify-between border-r border-white/10 bg-background/80 px-4 ">
         <div className="flex items-center gap-3">
-          <div className="flex h-7 w-7 items-center justify-center rounded-md bg-white text-zinc-950 shadow-sm">
-            <div className="h-2 w-2 rounded-sm bg-zinc-950" />
-          </div>
+          <div className="flex h-4 w-4 items-center justify-center rounded-full bg-white text-zinc-950 shadow-sm"></div>
           <div>
             <h1 className="text-sm font-semibold tracking-tight">SpeakBro</h1>
-            <p className="hidden text-[11px] text-zinc-500 sm:block">Voice workspace</p>
           </div>
         </div>
 
-        {/* Center Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList aria-label="Workspace views">
-            <TabsTrigger value="orchestration">Orchestration</TabsTrigger>
-            <TabsTrigger value="memory">Memory</TabsTrigger>
-          </TabsList>
-        </Tabs>
-
+        <div className="border border-white/10 rounded-md flex flex-col p-2">
+          <Button onClick={() => setActiveTab("orchestration")}>
+            Orchestration
+          </Button>
+          <Button onClick={() => setActiveTab("memory")}>Memory</Button>
+        </div>
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
             <span className="relative flex h-2 w-2">
@@ -813,115 +809,107 @@ export default function App() {
       </header>
 
       {/* Main Layout */}
-      <main className="mx-auto flex min-h-0 w-full max-w-[1400px] flex-1 overflow-hidden px-0 sm:px-4 sm:py-4">
-        <div className="flex-1 overflow-hidden flex flex-col">
-          {activeTab === "orchestration" && (
-            <div className="flex h-full min-h-0 flex-col gap-0 md:flex-row md:gap-4 animate-in">
-              <div className="panel flex min-h-0 min-w-0 flex-1 flex-col md:rounded-lg">
-                <div className="panel-header shrink-0 bg-white/[0.02]">
-                  <h2 className="text-sm font-semibold text-white tracking-wide">
-                    Transcript
-                  </h2>
-                  <Button
-                    onClick={clearChatHistory}
-                    disabled={chat.length === 0}
-                    variant="ghost"
-                    size="sm">
-                    Clear
-                  </Button>
-                </div>
-                <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4 sm:p-6">
-                  {chat.length === 0 ? (
-                    <div className="flex flex-1 items-center justify-center text-sm text-zinc-400">
-                      No interactions yet. Start speaking.
-                    </div>
-                  ) : (
-                    chat.map((t) => (
-                      <div
-                        key={t.id}
-                        className={`flex w-full animate-in ${t.role === "user" ? "justify-end" : "justify-start"}`}>
+      <main className="mx-auto max-w-7xl w-full h-full overflow-hidden">
+        {activeTab === "orchestration" && (
+          <div className="flex h-full min-h-0 w-full">
+            <div className="panel flex min-h-0 w-96 flex-col">
+              <div className="panel-header shrink-0">
+                <h2 className="text-sm font-semibold text-white tracking-wide">
+                  Transcript
+                </h2>
+                <Button
+                  onClick={clearChatHistory}
+                  disabled={chat.length === 0}
+                  variant="ghost"
+                  size="sm">
+                  Clear
+                </Button>
+              </div>
+              <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-2">
+                {chat.length === 0 ? (
+                  <div className="flex flex-1 items-center justify-center text-sm text-zinc-400">
+                    No interactions yet. Start speaking.
+                  </div>
+                ) : (
+                  chat.map((t) => (
+                    <div key={t.id} className={`flex w-full animate-in`}>
+                      <div>
                         <div
-                          className={`max-w-xl rounded-lg px-5 py-4 ${t.role === "user" ? "bg-white text-black rounded-tr-sm shadow-md" : "bg-zinc-900 border border-white/10 text-zinc-200 rounded-tl-sm"}`}>
-                          <div
-                            className={`text-xs font-medium mb-1.5 opacity-60 flex items-center gap-2 ${t.role === "user" ? "text-zinc-400 justify-end" : "text-zinc-400"}`}>
-                            {t.prefix}
-                            {t.ts && (
-                              <span>
-                                ·{" "}
-                                {new Date(t.ts).toLocaleTimeString([], {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                })}
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-sm leading-relaxed break-words font-sans">
-                            <Streamdown>{t.text}</Streamdown>
-                          </div>
+                          className={`text-xs font-medium opacity-60 flex items-center gap-2 ${t.role === "user" ? "text-zinc-400 justify-end" : "text-zinc-400"}`}>
+                          {t.prefix}
+                          {t.ts && (
+                            <span>
+                              {new Date(t.ts).toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-sm leading-relaxed break-words font-sans">
+                          <Streamdown>{t.text}</Streamdown>
                         </div>
                       </div>
-                    ))
-                  )}
-                  <div ref={chatEndRef} />
-                </div>
-                <form
-                  onSubmit={sendTextMessage}
-                  className="flex items-center gap-2 border-t border-white/10 bg-white/[0.02] p-3">
-                  <Input
-                    value={textInput}
-                    onChange={(e) => setTextInput(e.target.value)}
-                    placeholder="Message SpeakBro..."
-                    className="min-w-0 flex-1"
-                  />
-                  <button
+                    </div>
+                  ))
+                )}
+                <div ref={chatEndRef} />
+              </div>
+              <form
+                onSubmit={sendTextMessage}
+                className="flex flex-col items-end p-2 border-t border-white/10 h-36">
+                <textarea
+                  value={textInput}
+                  onChange={(e) => setTextInput(e.target.value)}
+                  placeholder="Message SpeakBro..."
+                  className="flex-1 text-lg w-full max-h-full outline-none border-none"
+                />
+                <div className="flex gap-2 items-center justify-end">
+                  <Button
+                    type="button"
+                    onClick={chooseProjectDirectory}
+                    title={projectDirectory ? `Project: ${projectDirectory}` : "Choose project directory"}>
+                    {projectDirectory || "Project"} <ChevronDown />
+                  </Button>
+                  <Button
                     type="button"
                     onPointerDown={handlePointerDown}
                     onPointerUp={handlePointerUp}
                     onPointerCancel={handlePointerUp}
                     aria-label="Use voice"
-                    title="Use voice"
-                    className={`flex h-10 shrink-0 items-center gap-2 rounded-lg border px-2.5 text-xs font-medium transition active:scale-95 touch-none cursor-pointer ${phase === "listening" ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-400" : phase === "error" ? "border-rose-500/40 bg-rose-500/15 text-rose-400" : phase === "thinking" || phase === "transcribing" || phase === "sending" ? "border-amber-500/40 bg-amber-500/15 text-amber-400" : "border-sky-500/30 bg-sky-500/10 text-sky-400 hover:bg-sky-500/20"}`}>
-                    <svg
-                      viewBox="0 0 24 24"
-                      className="h-4 w-4"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      aria-hidden="true">
-                      <rect x="8" y="3" width="8" height="12" rx="4" />
-                      <path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6" />
-                    </svg>
-                    <span>{phase === "idle" ? "Voice" : label}</span>
-                  </button>
-                  <Button type="submit" disabled={!textInput.trim()} size="sm">
+                    title="Use voice">
+                    <Mic />
+                    {phase === "idle" ? "Voice" : label}
+                  </Button>
+                  <Button type="submit" disabled={!textInput.trim()}>
                     Send
                   </Button>
-                </form>
-              </div>
-              <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                <OpenCodePanel
-                  snapshot={opencodeSnapshot}
-                  selectedSessionId={selectedSessionId}
-                  onRefresh={syncOpenCodeSnapshot}
-                  onSelectSession={selectOpenCodeSession}
-                  onCreateSession={createOpenCodeSession}
-                  onDeleteSession={removeOpenCodeSession}
-                />
-              </div>
+                </div>
+              </form>
             </div>
-          )}
-
-          {activeTab === "memory" && (
-            <div className="animate-in h-full flex flex-col">
-              <MemoryPanel
-                events={memoryEvents}
-                memories={memoryRecords}
-                loading={memoryLoading}
-                error={memoryError}
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              <OpenCodePanel
+                snapshot={opencodeSnapshot}
+                selectedSessionId={selectedSessionId}
+                onRefresh={syncOpenCodeSnapshot}
+                onSelectSession={selectOpenCodeSession}
+                onCreateSession={createOpenCodeSession}
+                onDeleteSession={removeOpenCodeSession}
               />
             </div>
-          )}
-        </div>
+          </div>
+        )}
+
+        {activeTab === "memory" && (
+          <div className="animate-in h-full flex flex-col">
+            <MemoryPanel
+              events={memoryEvents}
+              memories={memoryRecords}
+              loading={memoryLoading}
+              error={memoryError}
+            />
+          </div>
+        )}
       </main>
     </div>
   );

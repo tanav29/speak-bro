@@ -1,20 +1,7 @@
 import { useMemo, useState } from "react";
-
-function Badge({ children, tone = "neutral" }) {
-  const tones = {
-    neutral: "border-white/10 bg-white/5 text-zinc-300",
-    good: "border-emerald-500/20 bg-emerald-500/10 text-emerald-300",
-    warning: "border-amber-500/20 bg-amber-500/10 text-amber-300",
-    danger: "border-rose-500/20 bg-rose-500/10 text-rose-300",
-  };
-
-  return (
-    <span
-      className={`inline-flex items-center rounded-md border px-2 py-1 text-[11px] font-medium ${tones[tone] || tones.neutral}`}>
-      {children}
-    </span>
-  );
-}
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 
 function formatRelativeTime(value) {
   if (!value) return "";
@@ -30,10 +17,10 @@ function formatRelativeTime(value) {
 }
 
 function toneForAction(action) {
-  if (action === "saved") return "good";
-  if (action === "skipped") return "warning";
-  if (action === "error") return "danger";
-  return "neutral";
+  if (action === "saved") return "default";
+  if (action === "skipped") return "secondary";
+  if (action === "error") return "destructive";
+  return "secondary";
 }
 
 function labelForAction(action) {
@@ -62,11 +49,11 @@ function formatMemoryTime(value) {
 }
 
 function memoryStatusTone(status) {
-  if (status === "done") return "good";
+  if (status === "done") return "default";
   if (status === "queued" || status === "indexing" || status === "extracting")
-    return "warning";
-  if (status === "failed") return "danger";
-  return "neutral";
+    return "secondary";
+  if (status === "failed") return "destructive";
+  return "secondary";
 }
 
 export function MemoryPanel({
@@ -100,12 +87,16 @@ export function MemoryPanel({
           </div>
         </div>
         <div className="flex flex-wrap justify-end gap-2">
-          <Badge tone="neutral">Total {memories.length}</Badge>
+          <Badge variant="secondary">Total {memories.length}</Badge>
         </div>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 sm:p-6">
-        {loading && <div className="text-sm font-medium text-zinc-400 text-center">Syncing database...</div>}
+        {loading && (
+          <div className="text-sm font-medium text-zinc-400 text-center">
+            Syncing database...
+          </div>
+        )}
 
         {error && (
           <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-400">
@@ -116,38 +107,43 @@ export function MemoryPanel({
         {!loading && !error && visibleMemories.length ? (
           <div className="grid gap-3">
             {visibleMemories.map((memory) => (
-              <div
+              <Card
                 key={memory.id}
-                className="rounded-md border border-white/10 bg-white/[0.03] px-4 py-3 transition-colors hover:bg-white/[0.06]">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-white break-words">
+                className="border-white/10 bg-white/[0.03] transition-colors hover:bg-white/[0.06]">
+                <CardHeader className="pb-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <CardTitle className="text-sm font-semibold text-white break-words">
                       {formatMemoryTitle(memory)}
-                    </div>
-                    <div className="mt-1.5 font-mono text-xs tracking-wider text-zinc-400 flex items-center gap-2 flex-wrap">
-                      <span className="text-sky-400 font-semibold uppercase">{memory.type || "memory"}</span>
-                      {memory.filepath ? (
-                        <>
-                          <span className="text-zinc-600">·</span>
-                          <span className="truncate max-w-xs text-zinc-200">{memory.filepath}</span>
-                        </>
-                      ) : null}
+                    </CardTitle>
+                    <div className="flex shrink-0 flex-col items-end gap-2">
+                      <Badge variant={memoryStatusTone(memory.status)}>
+                        {memory.status || "saved"}
+                      </Badge>
+                      <span className="text-xs font-medium text-zinc-400">
+                        {formatMemoryTime(memory.updatedAt || memory.createdAt)}
+                      </span>
                     </div>
                   </div>
-                  <div className="flex shrink-0 flex-col items-end gap-2">
-                    <Badge tone={memoryStatusTone(memory.status)}>
-                      {memory.status || "saved"}
-                    </Badge>
-                    <span className="text-xs font-medium text-zinc-400">
-                      {formatMemoryTime(memory.updatedAt || memory.createdAt)}
+                  <div className="mt-1.5 font-mono text-xs tracking-wider text-zinc-400 flex items-center gap-2 flex-wrap">
+                    <span className="text-sky-400 font-semibold uppercase">
+                      {memory.type || "memory"}
                     </span>
+                    {memory.filepath ? (
+                      <>
+                        <span className="text-zinc-600">·</span>
+                        <span className="truncate max-w-xs text-zinc-200">
+                          {memory.filepath}
+                        </span>
+                      </>
+                    ) : null}
                   </div>
-                </div>
-
-                <div className="mt-3 text-sm leading-relaxed text-zinc-200 break-words">
-                  {trimMemory(memory.content || memory.summary || "")}
-                </div>
-              </div>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <div className="text-sm leading-relaxed text-zinc-200 break-words">
+                    {trimMemory(memory.content || memory.summary || "")}
+                  </div>
+                </CardContent>
+              </Card>
             ))}
           </div>
         ) : (
@@ -167,23 +163,29 @@ export function MemoryPanel({
           </button>
         )}
 
-        <div className="pt-6 border-t border-white/10 mt-2">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-sm font-semibold text-white tracking-wide uppercase">Live Activity</h3>
-              <div className="mt-1 text-xs text-zinc-400">Recent memory save, skip, and index operations.</div>
+        <Separator className="border-t-white/10 mt-2 pt-6" />
+
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h3 className="text-sm font-semibold text-white tracking-wide uppercase">
+              Live Activity
+            </h3>
+            <div className="mt-1 text-xs text-zinc-400">
+              Recent memory save, skip, and index operations.
             </div>
           </div>
+        </div>
 
-          <div className="flex flex-col gap-3">
-            {events.length ? (
-              events.map((event) => (
-                <div
-                  key={event.id}
-                  className="rounded-md border border-white/10 bg-white/[0.03] px-4 py-3 transition-colors hover:bg-white/[0.06]">
+        <div className="flex flex-col gap-3">
+          {events.length ? (
+            events.map((event) => (
+              <Card
+                key={event.id}
+                className="border-white/10 bg-white/[0.03] transition-colors hover:bg-white/[0.06]">
+                <CardContent className="p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-2">
-                      <Badge tone={toneForAction(event.action)}>
+                      <Badge variant={toneForAction(event.action)}>
                         {labelForAction(event.action)}
                       </Badge>
                       <span className="truncate text-xs font-mono tracking-wider text-zinc-400 uppercase font-semibold">
@@ -204,14 +206,14 @@ export function MemoryPanel({
                       {event.reason}
                     </div>
                   )}
-                </div>
-              ))
-            ) : (
-              <div className="rounded-lg border border-dashed border-white/10 bg-white/5 p-4 text-center text-xs text-zinc-400">
-                No active session logs.
-              </div>
-            )}
-          </div>
+                </CardContent>
+              </Card>
+            ))
+          ) : (
+            <div className="rounded-lg border border-dashed border-white/10 bg-white/5 p-4 text-center text-xs text-zinc-400">
+              No active session logs.
+            </div>
+          )}
         </div>
       </div>
     </section>

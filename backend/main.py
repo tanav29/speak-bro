@@ -69,7 +69,9 @@ SYSTEM_PROMPT = (
     "The user can select an OpenCode session in the UI to have you manage it; that becomes the "
     "'selected session'. When you send a message or summarize, you may omit the session id to "
     "target the selected session automatically. If no session is selected and you omit the id, "
-    "ask the user to select one or create a new session."
+    "ask the user to select one or create a new session. "
+    "The Project button may provide a selected project directory; when present, "
+    "always pass that exact directory to create_opencode_session. "
     "dont send the full session id or some gibrish text to user in the last final text message part"
 )
 
@@ -432,6 +434,7 @@ async def create_opencode_session(
     ctx: RunContext[WebSocket],
     title: str = "SpeakBro session",
     message: str | None = None,
+    directory: str | None = None,
 ) -> str:
     """Create a new OpenCode session for complex coding tasks that require many steps of work.
 
@@ -439,14 +442,23 @@ async def create_opencode_session(
     or when a task clearly needs multiple steps of LLM work that would benefit from an
     OpenCode session. Do NOT create a session for simple questions or quick answers.
     If `message` is provided, it is queued to the new session immediately (fire and forget),
-    which is handy for kicking off the work right after creation.
+    which is handy for kicking off the work right after creation. If a project directory is
+    selected in the UI, pass it in `directory` so OpenCode starts in that directory.
     """
-    log_stage(logging.INFO, "tool.create_opencode_session", "title=%r", title)
+    selected_directory = directory or getattr(ctx.deps, "project_directory", None)
+    log_stage(
+        logging.INFO,
+        "tool.create_opencode_session",
+        "title=%r directory=%r",
+        title,
+        selected_directory,
+    )
     start = time.perf_counter()
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{OPENCODE_API_URL}/session",
+                headers={"x-opencode-directory": selected_directory} if selected_directory else None,
                 json={"title": title},
                 timeout=5.0,
             )
@@ -479,6 +491,7 @@ async def create_opencode_session(
                         msg_start = time.perf_counter()
                         msg_response = await client.post(
                             f"{OPENCODE_API_URL}/session/{session_id}/prompt_async",
+                            headers={"x-opencode-directory": selected_directory} if selected_directory else None,
                             json={
                                 # "model": {
                                 #     "providerID": provider_id,
@@ -518,6 +531,7 @@ async def create_opencode_session(
                         "success": True,
                         "session_id": session_id,
                         "title": data.get("title", title),
+                        "directory": selected_directory,
                         "queued": queued,
                     }
                 )
@@ -1196,6 +1210,16 @@ async def generate_llm_response(
                 f"No OpenCode session is currently selected. If the user asks you to manage or "
                 f"message a session, create one or ask them to select one in the UI."
             )
+        project_directory = getattr(websocket, "project_directory", None)
+        if project_directory:
+            user_prompt = (
+                f"[Selected project directory: {project_directory}]\n{user_prompt}"
+            )
+            instructions = (
+                f"{instructions}\n\nThe user selected project directory "
+                f"'{project_directory}'. When calling create_opencode_session, pass this "
+                f"exact value in its directory argument so OpenCode opens in that directory."
+            )
 
         log_stage(
             logging.INFO,
@@ -1319,6 +1343,23 @@ def synthesize_audio(
         return build_silence_wav(), "audio/wav"
 
 
+def choose_project_directory_native() -> str:
+    """Open a native folder picker and return the absolute local path."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        directory = filedialog.askdirectory(title="Choose OpenCode project directory")
+        root.destroy()
+        return directory or ""
+    except Exception as exc:
+        log_stage(logging.WARNING, "project.directory", "Native picker failed: %s", exc)
+        return ""
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
     """Manages full-duplex communication over WebSockets for voice recording, transcription, and feedback."""
@@ -1331,6 +1372,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     turn = TurnBuffer()
     session_history = [{"role": "system", "content": SYSTEM_PROMPT}]
     websocket.selected_session_id = None
+    websocket.project_directory = None
     current_turn_task: asyncio.Task | None = None
     current_turn_interrupt: threading.Event | None = None
 
@@ -1791,6 +1833,29 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         "message": "Interrupted. Ready for the next turn.",
                     }
                 )
+
+            elif event_type == "choose_project_directory":
+                directory = await asyncio.to_thread(choose_project_directory_native)
+                directory = directory.strip()
+                websocket.project_directory = directory or None
+                await websocket.send_json({
+                    "type": "project_directory",
+                    "directory": directory,
+                })
+                await websocket.send_json({
+                    "type": "status",
+                    "phase": "idle",
+                    "message": f"Project directory set to {directory}." if directory else "No project directory selected.",
+                })
+
+            elif event_type == "set_project_directory":
+                directory = str(payload.get("directory", "")).strip()
+                websocket.project_directory = directory or None
+                await websocket.send_json({
+                    "type": "status",
+                    "phase": "idle",
+                    "message": f"Project directory set to {directory}." if directory else "Project directory cleared.",
+                })
 
             elif event_type == "select_session":
                 new_selection = payload.get("sessionId")

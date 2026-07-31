@@ -8,7 +8,7 @@ export async function fetchMemories() {
   };
 }
 
-async function fetchJSON(url, init) {
+async function fetchJSON(url: string, init?: RequestInit) {
   const res = await fetch(url, init);
   if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
   return res.json();
