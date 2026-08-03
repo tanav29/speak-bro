@@ -1,12 +1,28 @@
-backend/.venv/
-backend/__pycache__/
-backend/*.pyc
-backend/*.egg-info/
-backend/.env
-frontend/node_modules/
-frontend/dist/
-voices/
-.env
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
 
-node_modules
-sandbox
+# Environment files
+.env
+.env.*
+!.env.example
+backend/.env
+frontend/.env
+
+# JavaScript / Vite
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+
+# Local project data
+sandbox/
+backend/voices/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
