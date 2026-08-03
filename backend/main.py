@@ -44,7 +44,12 @@ from config import (
     sm_client,
 )
 from logging_utils import log_stage, logger
-from memory_policy import classify_memory_candidate, clean_memory_text, normalize_memory_text, serialize_memory_item
+from memory_policy import (
+    classify_memory_candidate,
+    clean_memory_text,
+    normalize_memory_text,
+    serialize_memory_item,
+)
 
 SYSTEM_PROMPT = """You are SpeakBro — Tanav's voice co-pilot and vibecoding controller.
 
@@ -70,7 +75,7 @@ Answer yourself (no OpenCode) for:
 
 ## OpenCode playbook (high performance)
 1. Prefer ONE composite call: `run_coding_task` for "build/fix/implement X".
-   It ensures the server is up, reuses the selected session (or creates one),
+   It connects to the externally managed server, reuses the selected session (or creates one),
    targets the selected project directory, queues work, and can wait for progress.
 2. Prefer the selected session + selected project directory from context. Do not ask for them if present.
 3. If no session and the user wants coding work → `run_coding_task` or `create_opencode_session` with a kickoff message.
@@ -536,7 +541,9 @@ class OpenCodeServerManager:
                         proc.wait(timeout=3)
                     except subprocess.TimeoutExpired:
                         proc.kill()
-            log_stage(logging.INFO, "opencode.server", "Stopped managed OpenCode process")
+            log_stage(
+                logging.INFO, "opencode.server", "Stopped managed OpenCode process"
+            )
         except Exception as exc:
             log_stage(
                 logging.WARNING,
@@ -550,11 +557,15 @@ opencode_manager = OpenCodeServerManager()
 atexit.register(opencode_manager.stop)
 
 
-def _resolve_session_id(ctx: RunContext[WebSocket], session_id: str | None) -> str | None:
+def _resolve_session_id(
+    ctx: RunContext[WebSocket], session_id: str | None
+) -> str | None:
     return session_id or getattr(ctx.deps, "selected_session_id", None)
 
 
-def _resolve_directory(ctx: RunContext[WebSocket], directory: str | None = None) -> str | None:
+def _resolve_directory(
+    ctx: RunContext[WebSocket], directory: str | None = None
+) -> str | None:
     return directory or getattr(ctx.deps, "project_directory", None)
 
 
@@ -700,7 +711,10 @@ async def _fetch_session_snapshot(
                 continue
             todo_items.append(
                 {
-                    "content": t.get("content") or t.get("title") or t.get("text") or "",
+                    "content": t.get("content")
+                    or t.get("title")
+                    or t.get("text")
+                    or "",
                     "status": t.get("status") or t.get("state") or "",
                 }
             )
@@ -756,13 +770,13 @@ async def _queue_prompt(
 
 @agent.tool(strict=False)
 async def ensure_opencode_server(ctx: RunContext[WebSocket]) -> str:
-    """Make sure the OpenCode HTTP server is running (auto-starts `opencode serve` if needed).
+    """Check that the externally managed OpenCode HTTP server is reachable.
 
-    Call this only if another OpenCode tool failed with a connection error, or if the user
-    explicitly asks you to start OpenCode. Most coding tools already call this internally.
+    SpeakBro does not start OpenCode. Run it separately (locally or in a sandbox) and
+    provide its URL through OPENCODE_API_URL.
     """
     log_stage(logging.INFO, "tool.ensure_opencode_server", "called")
-    result = await opencode_manager.ensure(force_start=True)
+    result = await opencode_manager.ensure()
     return json.dumps(result)
 
 
@@ -779,8 +793,8 @@ async def run_coding_task(
     """PRIMARY coding tool. Hand a full coding job to OpenCode in one call.
 
     Use this whenever the user wants to build, fix, refactor, implement, or vibe-code something.
-    It will: (1) ensure OpenCode server is up, (2) reuse the selected/active session or create
-    a new one in the selected project directory, (3) queue a clear engineering prompt, and
+    It will: (1) connect to the externally managed OpenCode server, (2) reuse the selected/active
+    session or create a new one in the selected project directory, (3) queue a clear engineering prompt, and
     (4) optionally wait briefly and return status/todos/recent output.
 
     Prefer this over create+send separately. Write `task` as a concrete brief for a coding agent.
@@ -800,7 +814,9 @@ async def run_coding_task(
 
     ensured = await opencode_manager.ensure()
     if not ensured.get("success"):
-        return json.dumps({"success": False, "error": ensured.get("error"), "phase": "server"})
+        return json.dumps(
+            {"success": False, "error": ensured.get("error"), "phase": "server"}
+        )
 
     created = False
     session_title = title or (task.strip().split("\n")[0][:60] or "SpeakBro coding")
@@ -815,7 +831,11 @@ async def run_coding_task(
         )
         if not ok or not isinstance(data, dict) or not data.get("id"):
             return json.dumps(
-                {"success": False, "error": err or "Failed to create session", "phase": "create"}
+                {
+                    "success": False,
+                    "error": err or "Failed to create session",
+                    "phase": "create",
+                }
             )
         selected = data["id"]
         created = True
@@ -831,7 +851,9 @@ async def run_coding_task(
     if selected_dir:
         kickoff = f"Project directory: {selected_dir}\n\n{kickoff}"
 
-    queued_ok, queue_err = await _queue_prompt(selected, kickoff, directory=selected_dir)
+    queued_ok, queue_err = await _queue_prompt(
+        selected, kickoff, directory=selected_dir
+    )
     if not queued_ok:
         return json.dumps(
             {
@@ -906,7 +928,9 @@ async def create_opencode_session(
         timeout=10.0,
     )
     if not ok or not isinstance(data, dict) or not data.get("id"):
-        return json.dumps({"success": False, "error": err or "Failed to create OpenCode session"})
+        return json.dumps(
+            {"success": False, "error": err or "Failed to create OpenCode session"}
+        )
 
     session_id = data["id"]
     await _notify_session_selected(ctx, session_id)
@@ -947,7 +971,9 @@ async def list_opencode_sessions(ctx: RunContext[WebSocket]) -> str:
     """
     log_stage(logging.INFO, "tool.list_opencode_sessions", "called")
     directory = _resolve_directory(ctx)
-    ok, sessions, err = await _oc_request("GET", "/session", directory=directory, timeout=8.0)
+    ok, sessions, err = await _oc_request(
+        "GET", "/session", directory=directory, timeout=8.0
+    )
     if not ok:
         return json.dumps({"success": False, "error": err})
 
@@ -1188,7 +1214,9 @@ async def abort_opencode_session(
     )
     if not ok:
         return json.dumps({"success": False, "error": err, "session_id": selected})
-    return json.dumps({"success": True, "session_id": selected, "aborted": True, "result": data})
+    return json.dumps(
+        {"success": True, "session_id": selected, "aborted": True, "result": data}
+    )
 
 
 def safe_positive_int(value: object, default: int) -> int:
@@ -1579,9 +1607,7 @@ async def generate_llm_response(
             context_bits.append(f"project_directory={project_directory}")
         else:
             context_bits.append("project_directory=none")
-        user_prompt = (
-            f"[controller_context {' | '.join(context_bits)}]\n{user_prompt}"
-        )
+        user_prompt = f"[controller_context {' | '.join(context_bits)}]\n{user_prompt}"
 
         instructions = system_msg or SYSTEM_PROMPT
         controller_notes = [
@@ -2053,23 +2079,52 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         try:
             await websocket.send_json({"type": "transcript", "text": text})
             append_history(session_history, "user", text)
-            await websocket.send_json({"type": "status", "phase": "thinking", "message": "Thinking..."})
-            response = await generate_llm_response(session_history, websocket, websocket.selected_session_id)
+            await websocket.send_json(
+                {"type": "status", "phase": "thinking", "message": "Thinking..."}
+            )
+            response = await generate_llm_response(
+                session_history, websocket, websocket.selected_session_id
+            )
             if current_turn_interrupt.is_set():
                 return
             append_history(session_history, "assistant", response)
-            await websocket.send_json({"type": "status", "phase": "speaking", "message": "Speaking the reply..."})
-            audio_bytes, audio_mime = await asyncio.to_thread(synthesize_audio, response, current_turn_interrupt)
+            await websocket.send_json(
+                {
+                    "type": "status",
+                    "phase": "speaking",
+                    "message": "Speaking the reply...",
+                }
+            )
+            audio_bytes, audio_mime = await asyncio.to_thread(
+                synthesize_audio, response, current_turn_interrupt
+            )
             if current_turn_interrupt.is_set():
                 return
-            await websocket.send_json({"type": "audio", "mime": audio_mime, "text": response})
+            await websocket.send_json(
+                {"type": "audio", "mime": audio_mime, "text": response}
+            )
             await websocket.send_bytes(audio_bytes)
-            await websocket.send_json({"type": "status", "phase": "idle", "message": "Ready for the next turn."})
+            await websocket.send_json(
+                {
+                    "type": "status",
+                    "phase": "idle",
+                    "message": "Ready for the next turn.",
+                }
+            )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            log_stage(logging.ERROR, "ws.text", "Typed turn failed: %s", exc, session_id=session_id, exc_info=True)
-            await websocket.send_json({"type": "error", "phase": "idle", "message": "Text turn failed."})
+            log_stage(
+                logging.ERROR,
+                "ws.text",
+                "Typed turn failed: %s",
+                exc,
+                session_id=session_id,
+                exc_info=True,
+            )
+            await websocket.send_json(
+                {"type": "error", "phase": "idle", "message": "Text turn failed."}
+            )
         finally:
             current_turn_interrupt = None
 

@@ -152,20 +152,20 @@ function SessionDetail({ session, onBack, onDelete, deleting }) {
   const diffs = s.summary?.diffs ?? [];
 
   return (
-    <div className="flex h-full flex-col gap-2">
-      <div className="flex items-center gap-2">
+    <div className="flex h-full flex-col gap-3">
+      <div className="flex items-center gap-3">
         <button
           onClick={onBack}
-          className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-xs font-bold uppercase tracking-wider text-slate-400 transition hover:bg-white/10 hover:text-white active:scale-95"
+          className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-slate-300 transition-all hover:bg-white/10 hover:text-white active:scale-95 shadow-sm"
           type="button">
           {"\u2190 Back"}
         </button>
-        <span className="truncate text-xs font-semibold text-white">
+        <span className="truncate text-sm font-bold text-white drop-shadow-sm">
           {formatSessionTitle(s)}
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 text-xs text-slate-400">
+      <div className="grid grid-cols-2 gap-3 text-xs text-slate-300">
         <SessionField label="Created">
           {formatTime(s.time?.created)}
         </SessionField>
@@ -189,7 +189,7 @@ function SessionDetail({ session, onBack, onDelete, deleting }) {
         )}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-3 mt-1">
         <CopyButton text={s.id} />
         {s.share?.url && (
           <a
@@ -254,20 +254,20 @@ function SessionDetail({ session, onBack, onDelete, deleting }) {
             return (
               <div
                 key={info.id ?? i}
-                className={`rounded-lg border px-2 py-1.5 text-xs leading-relaxed ${
+                className={`rounded-xl border px-3 py-2 text-xs leading-relaxed shadow-sm transition-colors ${
                   isUser
-                    ? "border-sky-400/20 bg-sky-400/[0.06]"
+                    ? "border-cyan-500/30 bg-cyan-950/20 shadow-[0_2px_10px_rgba(34,211,238,0.05)]"
                     : "border-white/10 bg-white/5"
                 }`}>
-                <div className="mb-0.5 flex items-center justify-between gap-2">
-                  <span className="text-xs font-bold uppercase text-slate-500">
+                <div className="mb-1 flex items-center justify-between gap-2 border-b border-white/5 pb-1">
+                  <span className={`text-xs font-bold uppercase tracking-wider ${isUser ? "text-cyan-400" : "text-slate-400"}`}>
                     {isUser ? "You" : "OpenCode"}
                   </span>
-                  <span className="text-xs text-slate-600">
+                  <span className="text-[10px] font-mono text-slate-500">
                     {formatTime(info.time?.created)}
                   </span>
                 </div>
-                <pre className="whitespace-pre-wrap break-words font-sans text-slate-200">
+                <pre className="whitespace-pre-wrap break-words font-sans text-slate-200 mt-1">
                   {text}
                 </pre>
               </div>
@@ -380,9 +380,8 @@ export function OpenCodePanel({
         <>
           <div className="panel-header shrink-0">
             <div className="flex items-center gap-3 min-w-0">
-              <h2 className="shrink-0 text-sm font-semibold text-white">
-                OpenCode
-              </h2>
+              <div>
+              </div>
               {configInfo?.model && (
                 <span className="text-xs font-medium text-zinc-400 truncate hidden sm:inline">
                   {configInfo.model}
@@ -423,18 +422,18 @@ export function OpenCodePanel({
                     return (
                       <div
                         key={column}
-                        className="flex min-w-0 flex-1 flex-col bg-black/10">
-                        <div className="mb-1.5 flex items-center justify-between px-1">
+                        className="flex min-w-0 flex-1 flex-col bg-white/[0.02] border border-white/5 rounded-xl backdrop-blur-md p-2 shadow-inner">
+                        <div className="mb-2 flex items-center justify-between px-2 pt-1">
                           <div className="flex items-center gap-2">
-                            <span className="text-sm font-bold text-zinc-200">
+                            <span className="text-xs font-bold uppercase tracking-widest text-cyan-400/80">
                               {column}
                             </span>
                           </div>
-                          <span className="text-xs font-mono text-zinc-400">
+                          <span className="flex items-center justify-center h-5 px-2 rounded-full bg-white/10 text-[10px] font-mono font-bold text-zinc-300 shadow-sm">
                             {columnSessions.length}
                           </span>
                         </div>
-                        <div className="flex-1 overflow-y-auto space-y-2">
+                        <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 pb-1">
                           {columnSessions.length ? (
                             columnSessions.map((session) => {
                               const isActive = session.id === selectedSessionId;
@@ -443,15 +442,15 @@ export function OpenCodePanel({
                               return (
                                 <div
                                   key={session.id}
-                                  className={`rounded-lg p-3 transition-colors ${
+                                  className={`rounded-xl p-3 transition-all duration-300 border ${
                                     isActive
-                                      ? "border-white/30 bg-white/10"
-                                      : "border-white/10 bg-white/[0.03] hover:bg-white/[0.06]"
+                                      ? "border-cyan-500/50 bg-cyan-950/30 shadow-[0_4px_15px_rgba(34,211,238,0.15)] scale-[1.02]"
+                                      : "border-white/5 bg-white/[0.03] hover:bg-white/[0.08] hover:border-white/15"
                                   }`}>
                                   <div className="flex items-start justify-between gap-1">
                                     <button
                                       onClick={() => openDetail(session)}
-                                      className="min-w-0 truncate text-left text-xs font-bold text-white cursor-pointer"
+                                      className="min-w-0 truncate text-left text-xs font-bold text-zinc-100 hover:text-white transition-colors cursor-pointer drop-shadow-sm"
                                       type="button"
                                       title={formatSessionTitle(session)}>
                                       {formatSessionTitle(session)}
@@ -460,7 +459,7 @@ export function OpenCodePanel({
                                   </div>
                                   <div className="mt-1 flex items-center gap-1 text-xs text-zinc-400">
                                     <span className="truncate font-mono">
-                                      {session.directory.split().pop()}
+                                      {session.directory?.split(/[\\/]/).pop() || "No directory"}
                                     </span>
                                     <span className="ml-auto shrink-0">
                                       {formatRelativeTime(
@@ -476,14 +475,14 @@ export function OpenCodePanel({
                                           isActive ? null : session.id,
                                         )
                                       }
-                                      className={`rounded-md border h-4 w-4 font-semibold flex items-center justify-center transition-colors ${
+                                      className={`rounded-lg border h-5 w-5 font-semibold flex items-center justify-center transition-all ${
                                         isActive
-                                          ? "border-blue-500/40 bg-blue-500 text-white"
-                                          : "border-white/10 hover:border-white/30 text-zinc-200 hover:text-white"
+                                          ? "border-cyan-400/50 bg-cyan-500 text-black shadow-[0_0_10px_rgba(34,211,238,0.5)]"
+                                          : "border-white/10 hover:border-white/30 text-zinc-200 hover:bg-white/5 hover:text-white"
                                       }`}
                                       type="button">
                                       {isActive && (
-                                        <Check className="w-3 h-3" />
+                                        <Check className="w-3.5 h-3.5" />
                                       )}
                                     </button>
                                     {session.summary && (

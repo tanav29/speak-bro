@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { Streamdown } from "streamdown";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
@@ -11,8 +11,18 @@ import {
   createSession,
   deleteSession,
   opencodeUrl,
+  formatSessionTitle,
 } from "./opencodeApi";
-import { ChevronDown, Mic } from "lucide-react";
+import {
+  Activity,
+  Bell,
+  Check,
+  ChevronDown,
+  Mic,
+  ShieldCheck,
+  Sparkles,
+  X,
+} from "lucide-react";
 
 const TARGET_SAMPLE_RATE = 16000;
 const MAX_TRANSCRIPTS = 12;
@@ -94,6 +104,26 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("orchestration"); // "orchestration" | "memory"
   const [textInput, setTextInput] = useState("");
   const [projectDirectory, setProjectDirectory] = useState("");
+  const [sessionNotice, setSessionNotice] = useState(null);
+  const previousSessionStatusRef = useRef({});
+
+  const trustScore = useMemo(() => {
+    const hasMemory = memoryRecords.length > 0;
+    const hasSession = Boolean(selectedSessionId);
+    const hasConnection = connected;
+    return (
+      76 + (hasConnection ? 12 : 0) + (hasMemory ? 6 : 0) + (hasSession ? 6 : 0)
+    );
+  }, [connected, memoryRecords.length, selectedSessionId]);
+
+  const activitySummary = useMemo(() => {
+    if (phase === "thinking" || phase === "sending" || phase === "transcribing")
+      return "Agent is working — review before it speaks";
+    if (phase === "speaking") return "Response ready — tap Voice to interrupt";
+    if (memoryEvents.length)
+      return `${memoryEvents.length} memory decision${memoryEvents.length === 1 ? "" : "s"} recorded this session`;
+    return "No agent actions yet. Your next request will appear here.";
+  }, [memoryEvents.length, phase]);
 
   const socketRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -114,6 +144,15 @@ export default function App() {
   const selectedSessionIdRef = useRef(null);
   const pendingProjectPickerRef = useRef(false);
   const projectDirectoryRef = useRef("");
+
+  const enableSessionAlerts = useCallback(async () => {
+    if (typeof Notification === "undefined") return;
+    try {
+      await Notification.requestPermission();
+    } catch {
+      // The in-app completion banner remains available when notifications are blocked.
+    }
+  }, []);
 
   const sendSelectedSession = useCallback((sessionId) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
@@ -698,6 +737,40 @@ export default function App() {
   }, [syncMemories]);
 
   useEffect(() => {
+    const current = opencodeSnapshot?.sessionStatus ?? {};
+    const previous = previousSessionStatusRef.current;
+    const sessions = opencodeSnapshot?.sessions ?? [];
+
+    Object.entries(current).forEach(([sessionId, status]) => {
+      const before = previous[sessionId];
+      const beforeType = typeof before === "string" ? before : before?.type;
+      const currentType =
+        typeof status === "string"
+          ? status
+          : (status as { type?: string })?.type;
+      const wasRunning = ["busy", "running", "active"].includes(beforeType);
+      const isDone = ["idle", "completed", "success"].includes(currentType);
+      if (wasRunning && isDone) {
+        const session = sessions.find((item) => item.id === sessionId);
+        const title = session
+          ? formatSessionTitle(session)
+          : "OpenCode session";
+        setSessionNotice({ id: Date.now(), title });
+        if (
+          typeof Notification !== "undefined" &&
+          Notification.permission === "granted"
+        ) {
+          new Notification("OpenCode session complete", {
+            body: `${title} is ready for review.`,
+            tag: `opencode-${sessionId}`,
+          });
+        }
+      }
+    });
+    previousSessionStatusRef.current = current;
+  }, [opencodeSnapshot]);
+
+  useEffect(() => {
     let cancelled = false;
 
     void syncOpenCodeSnapshot();
@@ -776,48 +849,79 @@ export default function App() {
       : PHASE_LABELS[phase] || phase;
 
   return (
-    <div className="flex h-dvh w-full overflow-hidden font-sans">
-      {/* Modern Top Navbar */}
-      <header className="z-10 flex flex-col py-4 shrink-0 items-center justify-between border-r border-white/10 bg-background/80 px-4 ">
-        <div className="flex items-center gap-3">
-          <div className="flex h-4 w-4 items-center justify-center rounded-full bg-white text-zinc-950 shadow-sm"></div>
-          <div>
-            <h1 className="text-sm font-semibold tracking-tight">SpeakBro</h1>
+    <div className="app-shell flex h-dvh w-full flex-col overflow-hidden font-sans">
+      <header className="topbar z-10 flex shrink-0 items-center justify-between gap-4 border-b border-white/10 px-5 py-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="min-w-0">
+            <h1 className="text-sm font-semibold tracking-tight text-white drop-shadow-md">
+              SpeakBro
+            </h1>
           </div>
         </div>
-
-        <div className="border border-white/10 rounded-md flex flex-col p-2">
-          <Button onClick={() => setActiveTab("orchestration")}>
-            Orchestration
-          </Button>
-          <Button onClick={() => setActiveTab("memory")}>Memory</Button>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <span className="relative flex h-2 w-2">
-              {connected && (
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-md bg-emerald-500 opacity-75" />
-              )}
-              <span
-                className={`relative inline-flex rounded-md h-2 w-2 ${connected ? "bg-emerald-500" : connectionState === "Connecting" ? "bg-amber-500" : "bg-rose-500"}`}
-              />
-            </span>
-            <span className="text-sm font-medium text-zinc-400">
-              {connectionState}
-            </span>
+        <nav className="nav-switcher" aria-label="Workspace">
+          <button
+            className={
+              activeTab === "orchestration" ? "nav-item active" : "nav-item"
+            }
+            onClick={() => setActiveTab("orchestration")}>
+            Control room
+          </button>
+          <button
+            className={activeTab === "memory" ? "nav-item active" : "nav-item"}
+            onClick={() => setActiveTab("memory")}>
+            Memory
+          </button>
+        </nav>
+        <div className="flex items-center gap-3">
+          {typeof Notification !== "undefined" &&
+            Notification.permission !== "granted" && (
+              <button
+                className="alert-button"
+                type="button"
+                onClick={enableSessionAlerts}
+                title="Notify me when an OpenCode session finishes">
+                <Bell className="size-3.5" />
+                <span className="hidden lg:inline">Enable alerts</span>
+              </button>
+            )}
+          <div
+            className="trust-pill"
+            title="Based on connection, active workspace, and memory availability">
+            <ShieldCheck className="size-3.5" />
+            <span>Trust</span>
+            <strong>{trustScore}%</strong>
+          </div>
+          <div className="connection-pill">
+            <span
+              className={`status-dot ${connected ? "online" : connectionState === "Connecting" ? "pending" : "offline"}`}
+            />{" "}
+            <span className="hidden sm:inline">{connectionState}</span>
           </div>
         </div>
       </header>
 
-      {/* Main Layout */}
-      <main className="mx-auto max-w-7xl w-full h-full overflow-hidden">
+      <main className="mx-auto h-full w-full max-w-[1500px] overflow-hidden">
         {activeTab === "orchestration" && (
           <div className="flex h-full min-h-0 w-full">
+            {sessionNotice && (
+              <div className="session-complete-notice" role="status">
+                <div className="flex items-start gap-2">
+                  <Bell className="mt-0.5 size-4 text-emerald-300" />
+                  <div>
+                    <strong>Session complete</strong>
+                    <span>{sessionNotice.title} is ready for review.</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Dismiss notification"
+                  onClick={() => setSessionNotice(null)}>
+                  <X className="size-4" />
+                </button>
+              </div>
+            )}
             <div className="panel flex min-h-0 w-xl flex-col">
-              <div className="panel-header shrink-0">
-                <h2 className="text-sm font-semibold text-white tracking-wide">
-                  Transcript
-                </h2>
+              <div className="panel-header shrink-0 justify-end py-2">
                 <Button
                   onClick={clearChatHistory}
                   disabled={chat.length === 0}
@@ -826,31 +930,36 @@ export default function App() {
                   Clear
                 </Button>
               </div>
-              <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-2">
+              <div className="review-banner py-2">
+                <div className="flex items-center gap-2">
+                  <Activity className="size-4 text-cyan-300" />
+                  <span>{activitySummary}</span>
+                </div>
+              </div>
+              <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
                 {chat.length === 0 ? (
                   <div className="flex flex-1 items-center justify-center text-sm text-zinc-400">
                     No interactions yet. Start speaking.
                   </div>
                 ) : (
                   chat.map((t) => (
-                    <div key={t.id} className={`flex w-full animate-in`}>
-                      <div>
-                        <div
-                          className={`text-xs font-medium opacity-60 flex items-center gap-2 ${t.role === "user" ? "text-zinc-400 justify-end" : "text-zinc-400"}`}>
-                          {t.prefix}
-                          {t.ts && (
-                            <span>
-                              {new Date(t.ts).toLocaleTimeString([], {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })}
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-sm leading-relaxed break-words font-sans">
-                          <Streamdown>{t.text}</Streamdown>
-                        </div>
+                    <div key={t.id} className={`flex flex-col w-full`}>
+                      <div
+                        className={`text-xs font-medium opacity-60 flex items-center gap-2 ${t.role === "user" ? "text-zinc-400 justify-end" : "text-zinc-400"}`}>
+                        {t.prefix}
+                        {t.ts && (
+                          <span>
+                            {new Date(t.ts).toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}
+                          </span>
+                        )}
                       </div>
+                      <Streamdown
+                        className={`text-sm w-full font-sans ${t.role === "user" ? "justify-end" : ""}`}>
+                        {t.text}
+                      </Streamdown>
                     </div>
                   ))
                 )}
@@ -858,37 +967,59 @@ export default function App() {
               </div>
               <form
                 onSubmit={sendTextMessage}
-                className="flex flex-col items-end p-2 border-t border-white/10 h-36">
-                <textarea
-                  value={textInput}
-                  onChange={(e) => setTextInput(e.target.value)}
-                  placeholder="Message SpeakBro..."
-                  className="flex-1 text-lg w-full max-h-full outline-none border-none"
-                />
-                <div className="flex gap-2 items-center justify-end">
-                  <Button
-                    type="button"
-                    onClick={chooseProjectDirectory}
-                    title={
-                      projectDirectory
-                        ? `Project: ${projectDirectory}`
-                        : "Choose project directory"
-                    }>
-                    {projectDirectory || "Project"} <ChevronDown />
-                  </Button>
-                  <Button
-                    type="button"
-                    onPointerDown={handlePointerDown}
-                    onPointerUp={handlePointerUp}
-                    onPointerCancel={handlePointerUp}
-                    aria-label="Use voice"
-                    title="Use voice">
-                    <Mic />
-                    {phase === "idle" ? "Voice" : label}
-                  </Button>
-                  <Button type="submit" disabled={!textInput.trim()}>
-                    Send
-                  </Button>
+                className="flex flex-col p-3 border-t border-white/5 bg-black/40 backdrop-blur-md rounded-b-xl shadow-[0_-10px_40px_rgba(0,0,0,0.2)]">
+                <div className="relative flex flex-col rounded-xl bg-white/5 border border-white/10 p-2 transition-all duration-300 focus-within:bg-white/10 focus-within:border-cyan-500/50 focus-within:shadow-[0_0_20px_rgba(34,211,238,0.15)]">
+                  <textarea
+                    value={textInput}
+                    onChange={(e) => setTextInput(e.target.value)}
+                    placeholder="Message SpeakBro..."
+                    className="flex-1 w-full min-h-[60px] max-h-[120px] resize-none bg-transparent p-2 text-sm text-zinc-100 focus-within:outline-none placeholder:text-zinc-500 font-medium focus-within:border-none"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        sendTextMessage(e);
+                      }
+                    }}
+                  />
+                  <div className="flex gap-2 items-center justify-between mt-2 pt-2 border-t border-white/5">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="text-xs text-zinc-400 hover:text-white"
+                      onClick={chooseProjectDirectory}
+                      title={
+                        projectDirectory
+                          ? `Project: ${projectDirectory}`
+                          : "Choose project directory"
+                      }>
+                      {projectDirectory || "Choose Project"}{" "}
+                      <ChevronDown className="ml-1 size-3" />
+                    </Button>
+                    <div className="flex gap-2 items-center">
+                      <Button
+                        type="button"
+                        className={`transition-all duration-300 ${isRecordingRef.current ? "bg-emerald-500 hover:bg-emerald-400 text-black shadow-[0_0_20px_rgba(52,211,153,0.5)] scale-105" : "bg-white/10 hover:bg-white/20 text-white border border-white/10"}`}
+                        size="sm"
+                        onPointerDown={handlePointerDown}
+                        onPointerUp={handlePointerUp}
+                        onPointerCancel={handlePointerUp}
+                        aria-label="Use voice"
+                        title="Use voice">
+                        <Mic
+                          className={`${isRecordingRef.current ? "animate-pulse" : ""}`}
+                        />
+                        {phase === "idle" ? "Voice" : label}
+                      </Button>
+                      <Button
+                        type="submit"
+                        size="sm"
+                        className="bg-cyan-500 hover:bg-cyan-400 text-black font-semibold shadow-[0_0_15px_rgba(34,211,238,0.4)] transition-all"
+                        disabled={!textInput.trim()}>
+                        Send
+                      </Button>
+                    </div>
+                  </div>
                 </div>
               </form>
             </div>

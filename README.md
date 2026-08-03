@@ -61,9 +61,11 @@ LLM_MODEL_NAME=openai/gpt-oss-20b
 # Optional web search.
 EXA_API_KEY=your-exa-key
 
-# Optional OpenCode server.
-OPENCODE_API_URL=http://127.0.0.1:4096
-VITE_OPENCODE_API_BASE_URL=http://127.0.0.1:4096
+# OpenCode is managed separately (local machine or sandbox).
+# Pass the reachable OpenCode server URL to both backend and frontend.
+OPENCODE_API_URL=https://your-opencode-sandbox.example.com
+VITE_OPENCODE_API_BASE_URL=https://your-opencode-sandbox.example.com
+OPENCODE_AUTO_START=false
 ```
 
 For a local Ollama-compatible LLM, use values such as:
@@ -100,13 +102,15 @@ The backend health check is available at [http://localhost:8000/healthz](http://
 
 ## OpenCode integration (optional)
 
-Start an OpenCode server separately:
+SpeakBro does **not** start or own the OpenCode server by default. Run OpenCode wherever you want — including a sandbox — and pass its reachable URL through `OPENCODE_API_URL` and `VITE_OPENCODE_API_BASE_URL`. The OpenCode server must allow the frontend origin via CORS.
+
+For a local server:
 
 ```bash
 opencode serve --port 4096
 ```
 
-SpeakBro creates or manages an OpenCode session only when the request needs multi-step coding work or you explicitly ask for it.
+SpeakBro creates or manages an OpenCode session only when the request needs multi-step coding work or you explicitly ask for it. Set `OPENCODE_AUTO_START=true` only if you intentionally want the backend to spawn a local server.
 
 ## Memory demo
 

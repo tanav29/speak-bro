@@ -26,9 +26,14 @@ LLM_API_KEY = (
 LLM_PROVIDER = OpenAIProvider(base_url=LLM_BASE_URL, api_key=LLM_API_KEY)
 LLM_MODEL = OpenAIChatModel(model_name=LLM_MODEL_NAME, provider=LLM_PROVIDER)
 
-OPENCODE_API_URL = os.getenv("OPENCODE_API_URL", "http://127.0.0.1:4096").rstrip("/")
-OPENCODE_AUTO_START = os.getenv("OPENCODE_AUTO_START", "true").lower() in {
-    "1", "true", "yes", "on"
+OPENCODE_API_URL = os.getenv("OPENCODE_API_URL").rstrip("/")
+# SpeakBro connects to an externally managed OpenCode server (for example, a sandbox).
+# Set true only if you explicitly want the backend to spawn a local server.
+OPENCODE_AUTO_START = os.getenv("OPENCODE_AUTO_START", "false").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
 }
 OPENCODE_CORS = [
     origin.strip()

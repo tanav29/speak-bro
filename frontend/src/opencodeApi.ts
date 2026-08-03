@@ -1,5 +1,4 @@
-export const OPENCODE_API_BASE_URL =
-  import.meta.env.VITE_OPENCODE_API_BASE_URL ?? "http://127.0.0.1:4096";
+export const OPENCODE_API_BASE_URL = import.meta.env.VITE_OPENCODE_API_BASE_URL;
 
 export function opencodeUrl(path) {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;

@@ -81,10 +81,6 @@ export function MemoryPanel({
     <section className="panel flex h-full w-full min-h-0 flex-col md:rounded-lg">
       <div className="panel-header shrink-0">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-white">Memory bank</h2>
-          <div className="mt-1 text-xs text-zinc-500">
-            Durable knowledge saved by the agent.
-          </div>
         </div>
         <div className="flex flex-wrap justify-end gap-2">
           <Badge variant="secondary">Total {memories.length}</Badge>
@@ -167,12 +163,6 @@ export function MemoryPanel({
 
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h3 className="text-sm font-semibold text-white tracking-wide uppercase">
-              Live Activity
-            </h3>
-            <div className="mt-1 text-xs text-zinc-400">
-              Recent memory save, skip, and index operations.
-            </div>
           </div>
         </div>
 

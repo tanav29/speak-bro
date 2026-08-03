@@ -1,5 +1,39 @@
 ChatGPT CODEX INDIA HACKATHON 2026
 Themes, Problem Statements & Submission Guidelines
+
+## SpeakBro submission positioning
+
+**Project:** SpeakBro — a local-first voice agent control room
+**Track:** **Theme 2 — UX for Agentic Applications**
+**One-line pitch:** SpeakBro makes an agent observable and interruptible: people can see what it is doing, inspect OpenCode work, understand memory decisions, and stay in control of every turn.
+
+### Why it fits Theme 2
+
+SpeakBro is deliberately an interface layer rather than another hidden chatbot. The control room gives the user:
+
+- a live transcript and agent activity surface for steering the current turn;
+- connection, trust, and guardrail signals that explain whether it is safe to continue;
+- OpenCode session supervision with active/idle grouping, selection, transcript inspection, and diff summaries;
+- a durable memory review surface showing what was saved, skipped, and why;
+- interruption and project-selection controls so the user can stop or redirect work without losing context.
+
+### Judge-ready demo path (3 minutes)
+
+1. Open the **Control room** and point out the live connection and trust indicators.
+2. Send a short text request; show the transcript, working status, and activity banner.
+3. Select an OpenCode session, open its detail view, and inspect the transcript and diff summary.
+4. Return to the control room and interrupt a spoken response to demonstrate human override.
+5. Open **Memory** and show a saved/skipped decision with its reason and the live audit trail.
+6. Close by explaining the product thesis: *agents can move quickly without becoming unaccountable.*
+
+### Submission checklist
+
+- [ ] Public deployed link opens without credentials and the core flow works.
+- [ ] Public GitHub repository has visible commit history.
+- [ ] Demo video is 3 minutes or less and follows the path above.
+- [ ] Project description names Theme 2, the problem, architecture, and Codex-assisted build process.
+- [ ] Deployed build and repository contain the same polished control-room experience.
+
 Build Phase Guidelines
 Participants must choose one of the nine themes, pick or invent a project, and build a functional solution during the challenge timeline.
 Submission Deadline: 3rd August Late entries will not be accepted.
