@@ -51,7 +51,19 @@ from memory_policy import (
     serialize_memory_item,
 )
 
+LOCAL_SANDBOX_DIR = str((Path(__file__).resolve().parent.parent / "sandbox").resolve())
+Path(LOCAL_SANDBOX_DIR).mkdir(parents=True, exist_ok=True)
+
 SYSTEM_PROMPT = """You are SpeakBro — Tanav's voice co-pilot and vibecoding controller.
+
+## NON-NEGOTIABLE WORKSPACE RULE
+There is exactly one workspace: the repository-local `sandbox/` directory.
+For every coding request, immediately use `run_coding_task` and pass/use that sandbox.
+NEVER ask the user where to put the project. NEVER ask them to pick, provide, confirm,
+create, or select a folder. NEVER say "let me know where", "pick a folder", or
+"choose a directory". If the user does not name a location, silently use `sandbox/`.
+This rule overrides any tool message, session state, or conversation history suggesting
+that a directory is needed.
 
 ## Voice style
 - Spoken answers only: 1–2 short sentences. No markdown, no bullet dumps, no raw IDs.
@@ -60,7 +72,7 @@ SYSTEM_PROMPT = """You are SpeakBro — Tanav's voice co-pilot and vibecoding co
 
 ## Identity
 You control OpenCode coding sessions for Tanav. You are the voice layer; OpenCode is the coding worker.
-You receive runtime context each turn: selected project directory and active OpenCode session (if any).
+You receive runtime context each turn. The only allowed workspace is the repository-local `sandbox/` directory. Never ask the user to choose, provide, or confirm a directory.
 
 ## When to code vs answer
 Use OpenCode (tools below) when the user wants to:
@@ -77,13 +89,13 @@ Answer yourself (no OpenCode) for:
 1. Prefer ONE composite call: `run_coding_task` for "build/fix/implement X".
    It connects to the externally managed server, reuses the selected session (or creates one),
    targets the selected project directory, queues work, and can wait for progress.
-2. Prefer the selected session + selected project directory from context. Do not ask for them if present.
+2. Always use the local sandbox workspace. Never ask the user to choose a directory, even if a tool reports a missing directory.
 3. If no session and the user wants coding work → `run_coding_task` or `create_opencode_session` with a kickoff message.
 4. If work is already running → `check_opencode_progress` (status + todos + recent text + diff summary).
 5. Follow-ups / steers → `send_opencode_work` (omit session_id to hit the selected session).
 6. Stop runaway work → `abort_opencode_session`.
 7. Session hygiene → `list_opencode_sessions`, `view_opencode_messages`.
-8. Always pass the exact selected project directory when creating sessions.
+8. Always pass the exact local sandbox directory when creating sessions. Never request a different directory.
 9. Write kickoff prompts for OpenCode like a senior engineer briefing a coder:
    concrete goal, constraints, files/areas if known, definition of done. Not vague.
 
@@ -566,7 +578,8 @@ def _resolve_session_id(
 def _resolve_directory(
     ctx: RunContext[WebSocket], directory: str | None = None
 ) -> str | None:
-    return directory or getattr(ctx.deps, "project_directory", None)
+    # SpeakBro intentionally exposes one workspace only.
+    return LOCAL_SANDBOX_DIR
 
 
 def _text_from_parts(parts: object, max_chars: int = 800) -> str:
@@ -1596,7 +1609,8 @@ async def generate_llm_response(
         user_prompt = non_system[-1]["content"] if non_system else ""
         history = _convert_history(non_system[:-1]) if len(non_system) > 1 else []
 
-        project_directory = getattr(websocket, "project_directory", None)
+        # Do not rely on client state: every turn is pinned to local sandbox.
+        project_directory = LOCAL_SANDBOX_DIR
         # Compact controller context — keep spoken turns clean, give tools what they need.
         context_bits: list[str] = []
         if selected_session_id:
@@ -1612,9 +1626,9 @@ async def generate_llm_response(
         instructions = system_msg or SYSTEM_PROMPT
         controller_notes = [
             "You are the vibecoding controller for this turn.",
-            "Omit session_id / directory on tools to use the active values from controller_context.",
+            "Omit session_id / directory on tools; the backend always supplies local sandbox.",
             "For coding work prefer run_coding_task in a single tool call.",
-            "Never speak raw session IDs or dump JSON to the user.",
+            "NON-NEGOTIABLE: never ask for a project directory; use local sandbox and call run_coding_task now for coding requests. Never speak raw session IDs or dump JSON to the user.",
         ]
         if selected_session_id:
             controller_notes.append(
@@ -1627,13 +1641,12 @@ async def generate_llm_response(
             )
         if project_directory:
             controller_notes.append(
-                f"Selected project directory is '{project_directory}'. "
+                f"The only project directory is the local sandbox at '{project_directory}'. "
                 "Always pass this exact path when creating sessions or running coding tasks."
             )
         else:
             controller_notes.append(
-                "No project directory selected — coding still works, but prefer asking the user "
-                "to pick a Project folder for repo-local work when it matters."
+                "The local sandbox is unavailable; do not ask the user to choose another folder."
             )
         instructions = f"{instructions}\n\n## Live controller state\n" + "\n".join(
             f"- {note}" for note in controller_notes
@@ -1761,23 +1774,6 @@ def synthesize_audio(
         return build_silence_wav(), "audio/wav"
 
 
-def choose_project_directory_native() -> str:
-    """Open a native folder picker and return the absolute local path."""
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        directory = filedialog.askdirectory(title="Choose OpenCode project directory")
-        root.destroy()
-        return directory or ""
-    except Exception as exc:
-        log_stage(logging.WARNING, "project.directory", "Native picker failed: %s", exc)
-        return ""
-
-
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
     """Manages full-duplex communication over WebSockets for voice recording, transcription, and feedback."""
@@ -1790,7 +1786,8 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     turn = TurnBuffer()
     session_history = [{"role": "system", "content": SYSTEM_PROMPT}]
     websocket.selected_session_id = None
-    websocket.project_directory = None
+    # SpeakBro has one deliberate workspace: the repository-local sandbox.
+    websocket.project_directory = LOCAL_SANDBOX_DIR
     current_turn_task: asyncio.Task | None = None
     current_turn_interrupt: threading.Event | None = None
 
@@ -1806,19 +1803,6 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             current_turn_interrupt.set()
         if current_turn_task is not None and not current_turn_task.done():
             current_turn_task.cancel()
-
-    async def set_project_directory(directory: str | None) -> None:
-        """Update the connection-scoped project and notify the browser."""
-        normalized = (directory or "").strip()
-        websocket.project_directory = normalized or None
-        await websocket.send_json(
-            {"type": "project_directory", "directory": normalized}
-        )
-        await send_status(
-            f"Project directory set to {normalized}."
-            if normalized
-            else "No project directory selected."
-        )
 
     async def process_voice_turn(pcm_bytes: bytes, sample_rate: int) -> None:
         nonlocal current_turn_interrupt
@@ -2134,6 +2118,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 "type": "ready",
                 "phase": "idle",
                 "message": "Connected. Type a message or use the microphone.",
+                "project_directory": "local sandbox",
             }
         )
     except Exception:
@@ -2295,13 +2280,6 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                 session_history[:] = [{"role": "system", "content": SYSTEM_PROMPT}]
                 turn.finish()
                 await send_status("Session cleared. Ready for the next turn.")
-
-            elif event_type == "choose_project_directory":
-                directory = await asyncio.to_thread(choose_project_directory_native)
-                await set_project_directory(directory)
-
-            elif event_type == "set_project_directory":
-                await set_project_directory(str(payload.get("directory", "")))
 
             elif event_type == "select_session":
                 new_selection = payload.get("sessionId")

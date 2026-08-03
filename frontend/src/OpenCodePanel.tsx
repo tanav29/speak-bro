@@ -13,7 +13,7 @@ import {
   fetchSessionMessages,
   fetchSessionStatus,
 } from "./opencodeApi";
-import { Check, Copy, RotateCcw, Trash, X } from "lucide-react";
+import { Check, Copy, Plus, RotateCcw, Trash, X } from "lucide-react";
 
 function formatTime(value) {
   if (!value) return "\u2014";
@@ -260,7 +260,8 @@ function SessionDetail({ session, onBack, onDelete, deleting }) {
                     : "border-white/10 bg-white/5"
                 }`}>
                 <div className="mb-1 flex items-center justify-between gap-2 border-b border-white/5 pb-1">
-                  <span className={`text-xs font-bold uppercase tracking-wider ${isUser ? "text-cyan-400" : "text-slate-400"}`}>
+                  <span
+                    className={`text-xs font-bold uppercase tracking-wider ${isUser ? "text-cyan-400" : "text-slate-400"}`}>
                     {isUser ? "You" : "OpenCode"}
                   </span>
                   <span className="text-[10px] font-mono text-slate-500">
@@ -311,7 +312,7 @@ export function OpenCodePanel({
       }
     };
     void poll();
-    const timer = setInterval(poll, 2000);
+    const timer = setInterval(poll, 1000);
     return () => {
       cancelled = true;
       clearInterval(timer);
@@ -381,6 +382,9 @@ export function OpenCodePanel({
           <div className="panel-header shrink-0">
             <div className="flex items-center gap-3 min-w-0">
               <div>
+                <span className="text-sm font-semibold text-zinc-100">
+                  Idle sessions
+                </span>
               </div>
               {configInfo?.model && (
                 <span className="text-xs font-medium text-zinc-400 truncate hidden sm:inline">
@@ -389,13 +393,53 @@ export function OpenCodePanel({
               )}
             </div>
             <div className="flex gap-2 shrink-0">
-              <Button variant="outline" size="icon" onClick={onRefresh}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setComposing((value) => !value)}
+                title="Create OpenCode session">
+                <Plus />
+                <span className="hidden sm:inline">New session</span>
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={onRefresh}
+                title="Refresh sessions">
                 <RotateCcw />
               </Button>
             </div>
           </div>
 
           <div className="flex-1 overflow-y-auto">
+            {composing && (
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  void handleCreate();
+                }}
+                className="m-4 flex gap-2 rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3">
+                <input
+                  autoFocus
+                  value={newTitle}
+                  onChange={(event) => setNewTitle(event.target.value)}
+                  placeholder="Session title (optional)"
+                  className="min-w-0 flex-1 rounded-md border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none focus:border-cyan-400/50"
+                />
+                <Button type="submit" size="sm">
+                  Create
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setComposing(false)}
+                  title="Cancel">
+                  <X />
+                </Button>
+              </form>
+            )}
+
             {!connected && (
               <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
                 OpenCode offline. Run terminal workspace service to sync active
@@ -412,7 +456,7 @@ export function OpenCodePanel({
             <div className="flex h-full flex-1 flex-col p-4">
               {sessions.length ? (
                 <div className="flex min-h-0 flex-1 gap-2">
-                  {["busy", "idle"].map((column) => {
+                  {["idle"].map((column) => {
                     const columnSessions = sessions
                       .slice(0, limit)
                       .filter(
@@ -422,17 +466,7 @@ export function OpenCodePanel({
                     return (
                       <div
                         key={column}
-                        className="flex min-w-0 flex-1 flex-col bg-white/[0.02] border border-white/5 rounded-xl backdrop-blur-md p-2 shadow-inner">
-                        <div className="mb-2 flex items-center justify-between px-2 pt-1">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-bold uppercase tracking-widest text-cyan-400/80">
-                              {column}
-                            </span>
-                          </div>
-                          <span className="flex items-center justify-center h-5 px-2 rounded-full bg-white/10 text-[10px] font-mono font-bold text-zinc-300 shadow-sm">
-                            {columnSessions.length}
-                          </span>
-                        </div>
+                        className="flex min-w-0 flex-1 flex-col">
                         <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 pb-1">
                           {columnSessions.length ? (
                             columnSessions.map((session) => {
@@ -459,7 +493,9 @@ export function OpenCodePanel({
                                   </div>
                                   <div className="mt-1 flex items-center gap-1 text-xs text-zinc-400">
                                     <span className="truncate font-mono">
-                                      {session.directory?.split(/[\\/]/).pop() || "No directory"}
+                                      {session.directory
+                                        ?.split(/[\\/]/)
+                                        .pop() || "No directory"}
                                     </span>
                                     <span className="ml-auto shrink-0">
                                       {formatRelativeTime(

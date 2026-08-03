@@ -81,6 +81,7 @@ export function MemoryPanel({
     <section className="panel flex h-full w-full min-h-0 flex-col md:rounded-lg">
       <div className="panel-header shrink-0">
         <div className="min-w-0">
+          <span className="text-sm font-semibold text-zinc-100">Memory</span>
         </div>
         <div className="flex flex-wrap justify-end gap-2">
           <Badge variant="secondary">Total {memories.length}</Badge>

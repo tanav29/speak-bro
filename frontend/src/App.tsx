@@ -17,7 +17,6 @@ import {
   Activity,
   Bell,
   Check,
-  ChevronDown,
   Mic,
   ShieldCheck,
   Sparkles,
@@ -101,9 +100,7 @@ export default function App() {
   const [memoryLoading, setMemoryLoading] = useState(false);
   const [memoryError, setMemoryError] = useState(null);
   const [talkMode, setTalkMode] = useState("hold"); // "hold" | "tap"
-  const [activeTab, setActiveTab] = useState("orchestration"); // "orchestration" | "memory"
   const [textInput, setTextInput] = useState("");
-  const [projectDirectory, setProjectDirectory] = useState("");
   const [sessionNotice, setSessionNotice] = useState(null);
   const previousSessionStatusRef = useRef({});
 
@@ -132,6 +129,8 @@ export default function App() {
   const processorNodeRef = useRef(null);
   const monitorNodeRef = useRef(null);
   const playbackAudioRef = useRef(null);
+  // Ignore audio packets that were already queued when the user interrupted.
+  const suppressAudioRef = useRef(false);
   const isRecordingRef = useRef(false);
   const isHoldingRef = useRef(false);
   const pendingAudioMimeRef = useRef("audio/wav");
@@ -142,8 +141,6 @@ export default function App() {
   const chatEndRef = useRef(null);
   const hasConnectedRef = useRef(false);
   const selectedSessionIdRef = useRef(null);
-  const pendingProjectPickerRef = useRef(false);
-  const projectDirectoryRef = useRef("");
 
   const enableSessionAlerts = useCallback(async () => {
     if (typeof Notification === "undefined") return;
@@ -160,21 +157,6 @@ export default function App() {
         JSON.stringify({ type: "select_session", sessionId }),
       );
     }
-  }, []);
-
-  const chooseProjectDirectory = useCallback(async () => {
-    // The browser deliberately hides absolute filesystem paths. Ask the local
-    // backend to open a native folder dialog so OpenCode gets the real path.
-    if (socketRef.current?.readyState === WebSocket.OPEN) {
-      socketRef.current.send(
-        JSON.stringify({ type: "choose_project_directory" }),
-      );
-      setStatus("Choose a project directory...");
-      return;
-    }
-    setStatus("Connecting...");
-    pendingProjectPickerRef.current = true;
-    connectSocket();
   }, []);
 
   const syncOpenCodeSnapshot = useCallback(async () => {
@@ -263,6 +245,7 @@ export default function App() {
         return;
       }
       setTextInput("");
+      suppressAudioRef.current = false;
       setStatus("Thinking...");
       setPhase("thinking");
       socketRef.current.send(JSON.stringify({ type: "text", text }));
@@ -386,6 +369,7 @@ export default function App() {
       return;
 
     try {
+      suppressAudioRef.current = false;
       setMicError(null);
       setStatus("Requesting microphone...");
       setPhase("requesting-mic");
@@ -460,6 +444,10 @@ export default function App() {
   startRecordingRef.current = startRecording;
 
   const interruptSpeaking = useCallback(() => {
+    // Stop the element immediately and ignore any audio packet that is already
+    // queued on the WebSocket. The backend cancellation may arrive slightly
+    // after the browser receives that packet.
+    suppressAudioRef.current = true;
     cleanupPlayback();
     if (socketRef.current?.readyState === WebSocket.OPEN) {
       socketRef.current.send(JSON.stringify({ type: "interrupt" }));
@@ -476,7 +464,7 @@ export default function App() {
         isHoldingRef.current = true;
       }
 
-      if (phase === "speaking") {
+      if (phase === "speaking" || playbackAudioRef.current) {
         interruptSpeaking();
         return;
       }
@@ -569,19 +557,6 @@ export default function App() {
       setConnected(true);
       setStatus("Ready. Hold the button and speak.");
       setPhase("idle");
-      if (pendingProjectPickerRef.current) {
-        pendingProjectPickerRef.current = false;
-        socket.send(JSON.stringify({ type: "choose_project_directory" }));
-        setStatus("Choose a project directory...");
-      }
-      if (projectDirectoryRef.current) {
-        socket.send(
-          JSON.stringify({
-            type: "set_project_directory",
-            directory: projectDirectoryRef.current,
-          }),
-        );
-      }
       if (selectedSessionIdRef.current) {
         socket.send(
           JSON.stringify({
@@ -629,7 +604,7 @@ export default function App() {
           return;
         }
         if (payload.type === "audio") {
-          if (isRecordingRef.current) {
+          if (suppressAudioRef.current || isRecordingRef.current) {
             if (socketRef.current?.readyState === WebSocket.OPEN) {
               socketRef.current.send(JSON.stringify({ type: "interrupt" }));
             }
@@ -645,17 +620,6 @@ export default function App() {
         if (payload.type === "error") {
           setStatus(payload.message || "Something went wrong.");
           setPhase("error");
-          return;
-        }
-        if (payload.type === "project_directory") {
-          const directory = payload.directory || "";
-          projectDirectoryRef.current = directory;
-          setProjectDirectory(directory);
-          setStatus(
-            payload.directory
-              ? `Project: ${payload.directory}`
-              : "No project directory selected.",
-          );
           return;
         }
         if (payload.type === "opencode_session") {
@@ -685,7 +649,7 @@ export default function App() {
         return;
       }
 
-      if (isRecordingRef.current) {
+      if (suppressAudioRef.current || isRecordingRef.current) {
         return;
       }
 
@@ -765,6 +729,7 @@ export default function App() {
             tag: `opencode-${sessionId}`,
           });
         }
+
       }
     });
     previousSessionStatusRef.current = current;
@@ -858,20 +823,9 @@ export default function App() {
             </h1>
           </div>
         </div>
-        <nav className="nav-switcher" aria-label="Workspace">
-          <button
-            className={
-              activeTab === "orchestration" ? "nav-item active" : "nav-item"
-            }
-            onClick={() => setActiveTab("orchestration")}>
-            Control room
-          </button>
-          <button
-            className={activeTab === "memory" ? "nav-item active" : "nav-item"}
-            onClick={() => setActiveTab("memory")}>
-            Memory
-          </button>
-        </nav>
+        <div className="text-xs font-medium uppercase tracking-[0.18em] text-cyan-300/70">
+          Voice workspace
+        </div>
         <div className="flex items-center gap-3">
           {typeof Notification !== "undefined" &&
             Notification.permission !== "granted" && (
@@ -901,143 +855,130 @@ export default function App() {
       </header>
 
       <main className="mx-auto h-full w-full max-w-[1500px] overflow-hidden">
-        {activeTab === "orchestration" && (
-          <div className="flex h-full min-h-0 w-full">
-            {sessionNotice && (
-              <div className="session-complete-notice" role="status">
-                <div className="flex items-start gap-2">
-                  <Bell className="mt-0.5 size-4 text-emerald-300" />
-                  <div>
-                    <strong>Session complete</strong>
-                    <span>{sessionNotice.title} is ready for review.</span>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  aria-label="Dismiss notification"
-                  onClick={() => setSessionNotice(null)}>
-                  <X className="size-4" />
-                </button>
-              </div>
-            )}
-            <div className="panel flex min-h-0 w-xl flex-col">
-              <div className="panel-header shrink-0 justify-end py-2">
-                <Button
-                  onClick={clearChatHistory}
-                  disabled={chat.length === 0}
-                  variant="ghost"
-                  size="sm">
-                  Clear
-                </Button>
-              </div>
-              <div className="review-banner py-2">
-                <div className="flex items-center gap-2">
-                  <Activity className="size-4 text-cyan-300" />
-                  <span>{activitySummary}</span>
+        <div className="flex h-full min-h-0 w-full flex-col gap-3 p-3 lg:flex-row">
+          {sessionNotice && (
+            <div className="session-complete-notice" role="status">
+              <div className="flex items-start gap-2">
+                <Bell className="mt-0.5 size-4 text-emerald-300" />
+                <div>
+                  <strong>Session complete</strong>
+                  <span>{sessionNotice.title} is ready for review.</span>
                 </div>
               </div>
-              <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
-                {chat.length === 0 ? (
-                  <div className="flex flex-1 items-center justify-center text-sm text-zinc-400">
-                    No interactions yet. Start speaking.
-                  </div>
-                ) : (
-                  chat.map((t) => (
-                    <div key={t.id} className={`flex flex-col w-full`}>
-                      <div
-                        className={`text-xs font-medium opacity-60 flex items-center gap-2 ${t.role === "user" ? "text-zinc-400 justify-end" : "text-zinc-400"}`}>
-                        {t.prefix}
-                        {t.ts && (
-                          <span>
-                            {new Date(t.ts).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </span>
-                        )}
-                      </div>
-                      <Streamdown
-                        className={`text-sm w-full font-sans ${t.role === "user" ? "justify-end" : ""}`}>
-                        {t.text}
-                      </Streamdown>
+              <button
+                type="button"
+                aria-label="Dismiss notification"
+                onClick={() => setSessionNotice(null)}>
+                <X className="size-4" />
+              </button>
+            </div>
+          )}
+          <div className="panel flex min-h-0 w-full flex-col lg:w-1/3">
+            <div className="panel-header shrink-0 py-2">
+              <span className="text-sm font-semibold text-zinc-100">Chat</span>
+              <Button
+                onClick={clearChatHistory}
+                disabled={chat.length === 0}
+                variant="ghost"
+                size="sm">
+                Clear
+              </Button>
+            </div>
+            <div className="review-banner py-2">
+              <div className="flex items-center gap-2">
+                <Activity className="size-4 text-cyan-300" />
+                <span>{activitySummary}</span>
+              </div>
+            </div>
+            <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-4">
+              {chat.length === 0 ? (
+                <div className="flex flex-1 items-center justify-center text-sm text-zinc-400">
+                  No interactions yet. Start speaking.
+                </div>
+              ) : (
+                chat.map((t) => (
+                  <div key={t.id} className={`flex flex-col w-full`}>
+                    <div
+                      className={`text-xs font-medium opacity-60 flex items-center gap-2 ${t.role === "user" ? "text-zinc-400 justify-end" : "text-zinc-400"}`}>
+                      {t.prefix}
+                      {t.ts && (
+                        <span>
+                          {new Date(t.ts).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                      )}
                     </div>
-                  ))
-                )}
-                <div ref={chatEndRef} />
-              </div>
-              <form
-                onSubmit={sendTextMessage}
-                className="flex flex-col p-3 border-t border-white/5 bg-black/40 backdrop-blur-md rounded-b-xl shadow-[0_-10px_40px_rgba(0,0,0,0.2)]">
-                <div className="relative flex flex-col rounded-xl bg-white/5 border border-white/10 p-2 transition-all duration-300 focus-within:bg-white/10 focus-within:border-cyan-500/50 focus-within:shadow-[0_0_20px_rgba(34,211,238,0.15)]">
-                  <textarea
-                    value={textInput}
-                    onChange={(e) => setTextInput(e.target.value)}
-                    placeholder="Message SpeakBro..."
-                    className="flex-1 w-full min-h-[60px] max-h-[120px] resize-none bg-transparent p-2 text-sm text-zinc-100 focus-within:outline-none placeholder:text-zinc-500 font-medium focus-within:border-none"
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        sendTextMessage(e);
-                      }
-                    }}
-                  />
-                  <div className="flex gap-2 items-center justify-between mt-2 pt-2 border-t border-white/5">
+                    <Streamdown
+                      className={`text-sm w-full font-sans ${t.role === "user" ? "justify-end" : ""}`}>
+                      {t.text}
+                    </Streamdown>
+                  </div>
+                ))
+              )}
+              <div ref={chatEndRef} />
+            </div>
+            <form
+              onSubmit={sendTextMessage}
+              className="flex flex-col p-3 border-t border-white/5 bg-black/40 backdrop-blur-md rounded-b-xl shadow-[0_-10px_40px_rgba(0,0,0,0.2)]">
+              <div className="relative flex flex-col rounded-xl bg-white/5 border border-white/10 p-2 transition-all duration-300 focus-within:bg-white/10 focus-within:border-cyan-500/50 focus-within:shadow-[0_0_20px_rgba(34,211,238,0.15)]">
+                <textarea
+                  value={textInput}
+                  onChange={(e) => setTextInput(e.target.value)}
+                  placeholder="Message SpeakBro..."
+                  className="flex-1 w-full min-h-[60px] max-h-[120px] resize-none bg-transparent p-2 text-sm text-zinc-100 focus:outline-none outline-none border-none placeholder:text-zinc-500 font-medium focus:border-none"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      sendTextMessage(e);
+                    }
+                  }}
+                />
+                <div className="flex gap-2 items-center justify-between mt-2 pt-2 border-t border-white/5">
+                  <span
+                    className="px-2 text-xs font-medium text-zinc-400"
+                    title="All coding work runs inside the repository sandbox directory">
+                    Project: Local Sandbox
+                  </span>
+                  <div className="flex gap-2 items-center">
                     <Button
                       type="button"
-                      variant="ghost"
+                      className={`transition-all duration-300 ${isRecordingRef.current ? "bg-emerald-500 hover:bg-emerald-400 text-black shadow-[0_0_20px_rgba(52,211,153,0.5)] scale-105" : "bg-white/10 hover:bg-white/20 text-white border border-white/10"}`}
                       size="sm"
-                      className="text-xs text-zinc-400 hover:text-white"
-                      onClick={chooseProjectDirectory}
-                      title={
-                        projectDirectory
-                          ? `Project: ${projectDirectory}`
-                          : "Choose project directory"
-                      }>
-                      {projectDirectory || "Choose Project"}{" "}
-                      <ChevronDown className="ml-1 size-3" />
+                      onPointerDown={handlePointerDown}
+                      onPointerUp={handlePointerUp}
+                      onPointerCancel={handlePointerUp}
+                      aria-label="Use voice"
+                      title="Use voice">
+                      <Mic
+                        className={`${isRecordingRef.current ? "animate-pulse" : ""}`}
+                      />
+                      {phase === "idle" ? "Voice" : label}
                     </Button>
-                    <div className="flex gap-2 items-center">
-                      <Button
-                        type="button"
-                        className={`transition-all duration-300 ${isRecordingRef.current ? "bg-emerald-500 hover:bg-emerald-400 text-black shadow-[0_0_20px_rgba(52,211,153,0.5)] scale-105" : "bg-white/10 hover:bg-white/20 text-white border border-white/10"}`}
-                        size="sm"
-                        onPointerDown={handlePointerDown}
-                        onPointerUp={handlePointerUp}
-                        onPointerCancel={handlePointerUp}
-                        aria-label="Use voice"
-                        title="Use voice">
-                        <Mic
-                          className={`${isRecordingRef.current ? "animate-pulse" : ""}`}
-                        />
-                        {phase === "idle" ? "Voice" : label}
-                      </Button>
-                      <Button
-                        type="submit"
-                        size="sm"
-                        className="bg-cyan-500 hover:bg-cyan-400 text-black font-semibold shadow-[0_0_15px_rgba(34,211,238,0.4)] transition-all"
-                        disabled={!textInput.trim()}>
-                        Send
-                      </Button>
-                    </div>
+                    <Button
+                      type="submit"
+                      size="sm"
+                      className="bg-cyan-500 hover:bg-cyan-400 text-black font-semibold shadow-[0_0_15px_rgba(34,211,238,0.4)] transition-all"
+                      disabled={!textInput.trim()}>
+                      Send
+                    </Button>
                   </div>
                 </div>
-              </form>
-            </div>
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-              <OpenCodePanel
-                snapshot={opencodeSnapshot}
-                selectedSessionId={selectedSessionId}
-                onRefresh={syncOpenCodeSnapshot}
-                onSelectSession={selectOpenCodeSession}
-                onCreateSession={createOpenCodeSession}
-                onDeleteSession={removeOpenCodeSession}
-              />
-            </div>
+              </div>
+            </form>
           </div>
-        )}
-
-        {activeTab === "memory" && (
-          <div className="animate-in h-full flex flex-col">
+          <div className="flex min-h-0 min-w-0 w-full flex-col lg:w-1/3">
+            <OpenCodePanel
+              snapshot={opencodeSnapshot}
+              selectedSessionId={selectedSessionId}
+              onRefresh={syncOpenCodeSnapshot}
+              onSelectSession={selectOpenCodeSession}
+              onCreateSession={createOpenCodeSession}
+              onDeleteSession={removeOpenCodeSession}
+            />
+          </div>
+          <div className="flex min-h-0 min-w-0 w-full flex-col lg:w-1/3">
             <MemoryPanel
               events={memoryEvents}
               memories={memoryRecords}
@@ -1045,7 +986,7 @@ export default function App() {
               error={memoryError}
             />
           </div>
-        )}
+        </div>
       </main>
     </div>
   );
