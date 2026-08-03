@@ -1,28 +1,29 @@
 import asyncio
+import atexit
 import io
 import os
 import json
 import logging
+import shutil
+import signal
+import subprocess
 import time
 import re
 import wave
 import uuid
 import threading
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from functools import lru_cache
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Tuple
-
+from typing import Any, Optional, Tuple
 import httpx
-import supermemory
-from exa_py import Exa
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 import piper
 
-from dotenv import load_dotenv
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -31,49 +32,68 @@ from pydantic_ai.messages import ModelRequest, ModelResponse, UserPromptPart, Te
 from faster_whisper import WhisperModel
 
 
-load_dotenv()
-
-SM_API_KEY = os.getenv("SUPER_MEM_KEY")
-sm_client = supermemory.Supermemory(api_key=SM_API_KEY) if SM_API_KEY else None
-exa_client = Exa(api_key=os.getenv("EXA_API_KEY")) if os.getenv("EXA_API_KEY") else None
-CONTAINER_TAGS = ["sm_project_speakbro"]
-
-LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
-LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "openai/gpt-oss-20b")
-LLM_API_KEY = (
-    os.getenv("LLM_API_KEY")
-    or os.getenv("GROQ_API_KEY")
-    or os.getenv("CEREBRAS_API_KEY")
+from config import (
+    CONTAINER_TAGS,
+    LLM_MODEL,
+    OPENCODE_API_URL,
+    OPENCODE_AUTO_START,
+    OPENCODE_CORS,
+    OPENCODE_HOST,
+    OPENCODE_PORT,
+    exa_client,
+    sm_client,
 )
+from logging_utils import log_stage, logger
+from memory_policy import classify_memory_candidate, clean_memory_text, normalize_memory_text, serialize_memory_item
 
-LLM_PROVIDER = OpenAIProvider(base_url=LLM_BASE_URL, api_key=LLM_API_KEY)
+SYSTEM_PROMPT = """You are SpeakBro — Tanav's voice co-pilot and vibecoding controller.
 
-LLM_MODEL = OpenAIChatModel(model_name=LLM_MODEL_NAME, provider=LLM_PROVIDER)
+## Voice style
+- Spoken answers only: 1–2 short sentences. No markdown, no bullet dumps, no raw IDs.
+- Never speak full session IDs, paths dumps, JSON, or gibberish. Say "the coding session" or "this project".
+- Sound confident and fast. Confirm actions briefly, then move on.
 
-SYSTEM_PROMPT = (
-    "You are SpeakBro, a helpful, friendly, and concise voice assistant. "
-    "Keep your answers short and conversational (1 to 2 sentences max) as they will be spoken aloud. "
-    "Your master is Tanav. "
-    "Use supermemory to retrieve long term facts. Relevant memories about the user are "
-    "automatically recalled and prepended to your prompt — use them naturally without "
-    "announcing that you looked them up. Only save a memory when something is a durable, "
-    "long-term fact worth remembering. Prefer stable preferences, identity details, recurring "
-    "projects, allergies, or other lasting constraints. Do NOT save moods, one-off plans, "
-    "temporary status updates, timestamps, or casual conversation. "
-    "You have tools to search the web, manage memories, get the current time, "
-    "and manage OpenCode sessions (create, list, summarize, send messages, view messages). "
-    "Only create an OpenCode session when the task is complex and requires many steps of work, "
-    "or when the user explicitly asks you to use OpenCode or write code. "
-    "You can send a message to a session to hand it work, view the last few messages to recall "
-    "what happened, or summarize a session when it gets long. "
-    "The user can select an OpenCode session in the UI to have you manage it; that becomes the "
-    "'selected session'. When you send a message or summarize, you may omit the session id to "
-    "target the selected session automatically. If no session is selected and you omit the id, "
-    "ask the user to select one or create a new session. "
-    "The Project button may provide a selected project directory; when present, "
-    "always pass that exact directory to create_opencode_session. "
-    "dont send the full session id or some gibrish text to user in the last final text message part"
-)
+## Identity
+You control OpenCode coding sessions for Tanav. You are the voice layer; OpenCode is the coding worker.
+You receive runtime context each turn: selected project directory and active OpenCode session (if any).
+
+## When to code vs answer
+Use OpenCode (tools below) when the user wants to:
+- write, edit, refactor, debug, or ship code
+- work in a project / repo / codebase
+- "vibe code", "build X", "fix this", "add a feature", "open a session"
+- continue, check, stop, or steer an existing coding session
+
+Answer yourself (no OpenCode) for:
+- chitchat, time, memory, web facts, simple questions
+- explaining concepts without changing code
+
+## OpenCode playbook (high performance)
+1. Prefer ONE composite call: `run_coding_task` for "build/fix/implement X".
+   It ensures the server is up, reuses the selected session (or creates one),
+   targets the selected project directory, queues work, and can wait for progress.
+2. Prefer the selected session + selected project directory from context. Do not ask for them if present.
+3. If no session and the user wants coding work → `run_coding_task` or `create_opencode_session` with a kickoff message.
+4. If work is already running → `check_opencode_progress` (status + todos + recent text + diff summary).
+5. Follow-ups / steers → `send_opencode_work` (omit session_id to hit the selected session).
+6. Stop runaway work → `abort_opencode_session`.
+7. Session hygiene → `list_opencode_sessions`, `view_opencode_messages`.
+8. Always pass the exact selected project directory when creating sessions.
+9. Write kickoff prompts for OpenCode like a senior engineer briefing a coder:
+   concrete goal, constraints, files/areas if known, definition of done. Not vague.
+
+## Memory
+Relevant memories are auto-recalled — use them silently.
+Only save durable long-term facts (preferences, identity, projects, allergies, lasting constraints).
+Never save moods, one-off plans, temporary status, or casual chat.
+
+## Tools at a glance
+- web_search, search_memories, add_memory, get_current_time
+- run_coding_task (preferred for coding asks)
+- create_opencode_session, list_opencode_sessions, send_opencode_work
+- check_opencode_progress, view_opencode_messages, abort_opencode_session
+- select_opencode_session, ensure_opencode_server
+"""
 
 agent = Agent(
     LLM_MODEL,
@@ -83,75 +103,6 @@ agent = Agent(
 )
 
 
-MEMORY_TRANSIENT_PATTERNS = (
-    r"\b(today|tonight|tomorrow|yesterday|this morning|this afternoon|this evening)\b",
-    r"\b(right now|currently|for now|temporary|temporarily|one-time|one off|just for now)\b",
-    r"\b(going to|gonna|will be|planning to|plan to|need to|have to|about to)\b",
-    r"\b(meeting|appointment|lunch|dinner|flight|ride|errand|deadline)\b",
-    r"\b(mood|tired|hungry|bored|stressed|anxious|busy)\b",
-)
-
-MEMORY_DURABLE_HINTS = (
-    r"\b(i like|i love|i prefer|my favorite|my favourite|i usually|i always|i never)\b",
-    r"\b(my name is|call me|i am|i'm|i work as|i work on|i live in|i live at|i use)\b",
-    r"\b(pronouns|allergic|allergy|diagnosed|birthday|partner|spouse|kid|children|pet)\b",
-    r"\b(project|startup|company|team|repo|workspace|stack|deadline)\b",
-    r"\b(language|timezone|diet|exercise|habit|goal|goal is|goal of)\b",
-)
-
-MEMORY_PREFIX_STRIPPER = re.compile(
-    r"^(please\s+)?(remember|note|keep in mind)(\s+that|\s+this)?[:,\s-]*",
-    re.IGNORECASE,
-)
-
-
-def normalize_memory_text(text: str) -> str:
-    return " ".join((text or "").split()).strip()
-
-
-def clean_memory_text(text: str) -> str:
-    cleaned = normalize_memory_text(text)
-    cleaned = MEMORY_PREFIX_STRIPPER.sub("", cleaned).strip(" .")
-    return cleaned or normalize_memory_text(text)
-
-
-def classify_memory_candidate(text: str) -> dict:
-    normalized = normalize_memory_text(text)
-    lower = normalized.lower()
-    word_count = len(normalized.split())
-
-    durable_hits = [
-        pattern for pattern in MEMORY_DURABLE_HINTS if re.search(pattern, lower)
-    ]
-    transient_hits = [
-        pattern for pattern in MEMORY_TRANSIENT_PATTERNS if re.search(pattern, lower)
-    ]
-
-    should_save = bool(durable_hits) and not transient_hits and word_count >= 4
-    if word_count < 4:
-        should_save = False
-
-    if transient_hits and not durable_hits:
-        reason = "Looks temporary or situational, so it was skipped."
-        category = "transient"
-    elif durable_hits:
-        reason = "Looks like a durable fact worth keeping."
-        category = "durable"
-    else:
-        reason = "Not enough signal that this is a long-term fact."
-        category = "uncertain"
-
-    return {
-        "should_save": should_save,
-        "reason": reason,
-        "category": category,
-        "word_count": word_count,
-        "transient_hits": len(transient_hits),
-        "durable_hits": len(durable_hits),
-        "cleaned": clean_memory_text(normalized),
-    }
-
-
 async def send_memory_event(ctx: RunContext[WebSocket], payload: dict) -> None:
     try:
         await ctx.deps.send_json({"type": "memory_event", **payload})
@@ -159,23 +110,7 @@ async def send_memory_event(ctx: RunContext[WebSocket], payload: dict) -> None:
         return
 
 
-def _serialize_memory_item(memory: object) -> dict:
-    return {
-        "id": getattr(memory, "id", ""),
-        "title": getattr(memory, "title", None),
-        "content": getattr(memory, "content", None),
-        "summary": getattr(memory, "summary", None),
-        "createdAt": getattr(memory, "created_at", None),
-        "updatedAt": getattr(memory, "updated_at", None),
-        "status": getattr(memory, "status", None),
-        "type": getattr(memory, "type", None),
-        "url": getattr(memory, "url", None),
-        "filepath": getattr(memory, "filepath", None),
-        "customId": getattr(memory, "custom_id", None),
-        "connectionId": getattr(memory, "connection_id", None),
-        "containerTags": getattr(memory, "container_tags", None),
-        "metadata": getattr(memory, "metadata", None),
-    }
+_serialize_memory_item = serialize_memory_item
 
 
 @agent.tool(strict=False)
@@ -429,410 +364,10 @@ def get_current_time(ctx: RunContext[WebSocket]) -> str:
     return result
 
 
-@agent.tool(strict=False)
-async def create_opencode_session(
-    ctx: RunContext[WebSocket],
-    title: str = "SpeakBro session",
-    message: str | None = None,
-    directory: str | None = None,
-) -> str:
-    """Create a new OpenCode session for complex coding tasks that require many steps of work.
+# ---------------------------------------------------------------------------
+# OpenCode server manager + API helpers
+# ---------------------------------------------------------------------------
 
-    Use this when the user asks to write code, work on a project, debug something complex,
-    or when a task clearly needs multiple steps of LLM work that would benefit from an
-    OpenCode session. Do NOT create a session for simple questions or quick answers.
-    If `message` is provided, it is queued to the new session immediately (fire and forget),
-    which is handy for kicking off the work right after creation. If a project directory is
-    selected in the UI, pass it in `directory` so OpenCode starts in that directory.
-    """
-    selected_directory = directory or getattr(ctx.deps, "project_directory", None)
-    log_stage(
-        logging.INFO,
-        "tool.create_opencode_session",
-        "title=%r directory=%r",
-        title,
-        selected_directory,
-    )
-    start = time.perf_counter()
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{OPENCODE_API_URL}/session",
-                headers={"x-opencode-directory": selected_directory} if selected_directory else None,
-                json={"title": title},
-                timeout=5.0,
-            )
-            response.raise_for_status()
-            data = response.json()
-            session_id = data.get("id")
-            elapsed = time.perf_counter() - start
-            if session_id:
-                log_stage(
-                    logging.INFO,
-                    "opencode.session",
-                    "Created OpenCode session: %s",
-                    session_id,
-                )
-                log_stage(
-                    logging.INFO,
-                    "tool.create_opencode_session",
-                    "session_id=%s elapsed=%.2fs",
-                    session_id,
-                    elapsed,
-                )
-                await ctx.deps.send_json(
-                    {"type": "opencode_session", "sessionId": session_id}
-                )
-                ctx.deps.selected_session_id = session_id
-
-                queued = False
-                if message:
-                    try:
-                        msg_start = time.perf_counter()
-                        msg_response = await client.post(
-                            f"{OPENCODE_API_URL}/session/{session_id}/prompt_async",
-                            headers={"x-opencode-directory": selected_directory} if selected_directory else None,
-                            json={
-                                # "model": {
-                                #     "providerID": provider_id,
-                                #     "modelID": model_id,
-                                # },
-                                "parts": [{"type": "text", "text": message}],
-                            },
-                            timeout=10.0,
-                        )
-                        msg_elapsed = time.perf_counter() - msg_start
-                        queued = msg_response.status_code == 204
-                        log_stage(
-                            logging.INFO,
-                            "opencode.session",
-                            "Queued message to new OpenCode session: %s",
-                            session_id,
-                        )
-                        log_stage(
-                            logging.INFO,
-                            "tool.create_opencode_session",
-                            "message queued session_id=%s elapsed=%.2fs",
-                            session_id,
-                            msg_elapsed,
-                        )
-                    except Exception as e:
-                        log_stage(
-                            logging.WARNING,
-                            "opencode.session",
-                            "Failed to queue message to new OpenCode session %s: %s",
-                            session_id,
-                            e,
-                            exc_info=True,
-                        )
-
-                return json.dumps(
-                    {
-                        "success": True,
-                        "session_id": session_id,
-                        "title": data.get("title", title),
-                        "directory": selected_directory,
-                        "queued": queued,
-                    }
-                )
-    except Exception as e:
-        elapsed = time.perf_counter() - start
-        log_stage(
-            logging.WARNING,
-            "opencode.session",
-            "Failed to create OpenCode session: %s",
-            e,
-            exc_info=True,
-        )
-        log_stage(
-            logging.ERROR,
-            "tool.create_opencode_session",
-            "error after %.2fs: %s",
-            elapsed,
-            e,
-        )
-    return json.dumps({"success": False, "error": "Failed to create OpenCode session"})
-
-
-@agent.tool(strict=False)
-async def list_opencode_sessions(ctx: RunContext[WebSocket]) -> str:
-    """List all existing OpenCode sessions.
-
-    Use this to check what sessions are available before summarizing, forking, or
-    managing sessions. Returns session IDs, titles, and basic info.
-    """
-    log_stage(logging.INFO, "tool.list_opencode_sessions", "called")
-    start = time.perf_counter()
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{OPENCODE_API_URL}/session",
-                timeout=5.0,
-            )
-            response.raise_for_status()
-            sessions = response.json()
-            summaries = [
-                {"id": s.get("id"), "title": s.get("title", "Untitled")}
-                for s in sessions
-            ]
-            elapsed = time.perf_counter() - start
-            log_stage(
-                logging.INFO,
-                "tool.list_opencode_sessions",
-                "count=%d elapsed=%.2fs",
-                len(summaries),
-                elapsed,
-            )
-            return json.dumps(
-                {"success": True, "sessions": summaries, "count": len(summaries)}
-            )
-    except Exception as e:
-        elapsed = time.perf_counter() - start
-        log_stage(
-            logging.WARNING,
-            "opencode.session",
-            "Failed to list OpenCode sessions: %s",
-            e,
-            exc_info=True,
-        )
-        log_stage(
-            logging.ERROR,
-            "tool.list_opencode_sessions",
-            "error after %.2fs: %s",
-            elapsed,
-            e,
-        )
-        return json.dumps({"success": False, "error": str(e)})
-
-
-@agent.tool(strict=False)
-async def summarize_opencode_session(
-    ctx: RunContext[WebSocket],
-    session_id: str | None = None,
-) -> str:
-    """Return the last 3 text messages from an OpenCode session.
-
-    Use this when the user wants to inspect recent session history. Only text parts are
-    included in the output, matching the message shapes documented by OpenCode.
-
-    If `session_id` is omitted, the currently selected OpenCode session (chosen by the
-    user in the UI) is used automatically.
-    """
-    selected = session_id or getattr(ctx.deps, "selected_session_id", None)
-    if not selected:
-        log_stage(
-            logging.WARNING,
-            "tool.summarize_opencode_session",
-            "No session_id provided and no selected session",
-        )
-        return json.dumps(
-            {
-                "success": False,
-                "error": "No session_id provided and no OpenCode session is currently selected. Ask the user to select a session or pass a session_id.",
-            }
-        )
-
-    def _text_only_content(parts: object) -> str:
-        if not isinstance(parts, list):
-            return ""
-
-        texts: list[str] = []
-        for part in parts:
-            if not isinstance(part, dict):
-                continue
-            if part.get("type") != "text":
-                continue
-            text = part.get("text")
-            if isinstance(text, str) and text.strip():
-                texts.append(text.strip())
-        return "\n".join(texts).strip()
-
-    def _created_at(item: object) -> int:
-        if not isinstance(item, dict):
-            return 0
-        info = item.get("info")
-        if not isinstance(info, dict):
-            return 0
-        time_info = info.get("time")
-        if not isinstance(time_info, dict):
-            return 0
-        created = time_info.get("created")
-        return created if isinstance(created, int) else 0
-
-    log_stage(
-        logging.INFO,
-        "tool.summarize_opencode_session",
-        "session_id=%s",
-        selected,
-    )
-    start = time.perf_counter()
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{OPENCODE_API_URL}/session/{selected}/message",
-                params={"limit": 3},
-                timeout=10.0,
-            )
-            response.raise_for_status()
-            messages = response.json()
-            if not isinstance(messages, list):
-                raise ValueError("Unexpected OpenCode messages response")
-
-            recent_messages = sorted(
-                (item for item in messages if isinstance(item, dict)),
-                key=_created_at,
-            )[-3:]
-            result = [
-                {
-                    "id": item.get("info", {}).get("id"),
-                    "role": item.get("info", {}).get("role"),
-                    "created": item.get("info", {}).get("time", {}).get("created"),
-                    "content": _text_only_content(item.get("parts")),
-                }
-                for item in recent_messages
-            ]
-            elapsed = time.perf_counter() - start
-            log_stage(
-                logging.INFO,
-                "opencode.session",
-                "Loaded recent OpenCode messages: %s",
-                selected,
-            )
-            log_stage(
-                logging.INFO,
-                "tool.summarize_opencode_session",
-                "session_id=%s elapsed=%.2fs",
-                selected,
-                elapsed,
-            )
-            return json.dumps(
-                {
-                    "success": True,
-                    "session_id": selected,
-                    "message_count": len(result),
-                    "messages": result,
-                }
-            )
-    except Exception as e:
-        elapsed = time.perf_counter() - start
-        log_stage(
-            logging.WARNING,
-            "opencode.session",
-            "Failed to load OpenCode messages for session %s: %s",
-            selected,
-            e,
-            exc_info=True,
-        )
-        log_stage(
-            logging.ERROR,
-            "tool.summarize_opencode_session",
-            "error after %.2fs: %s session_id=%s",
-            elapsed,
-            e,
-            selected,
-        )
-        return json.dumps({"success": False, "error": str(e)})
-
-
-@agent.tool(strict=False)
-async def add_message_to_opencode_session(
-    ctx: RunContext[WebSocket],
-    message: str,
-    session_id: str | None = None,
-) -> str:
-    """Send a message to an existing OpenCode session asynchronously (fire and forget).
-
-    Use this to hand a task, instruction, or follow-up prompt to an OpenCode session
-    that is already created. The message is queued and processed by OpenCode without
-    waiting for a reply, which is ideal for kicking off work or chaining steps.
-
-    If `session_id` is omitted, the currently selected OpenCode session (chosen by the
-    user in the UI) is targeted automatically.
-    """
-    selected = session_id or getattr(ctx.deps, "selected_session_id", None)
-    if not selected:
-        log_stage(
-            logging.WARNING,
-            "tool.add_message_to_opencode_session",
-            "No session_id provided and no selected session",
-        )
-        return json.dumps(
-            {
-                "success": False,
-                "error": "No session_id provided and no OpenCode session is currently selected. Ask the user to select a session or pass a session_id.",
-            }
-        )
-    log_stage(
-        logging.INFO,
-        "tool.add_message_to_opencode_session",
-        "session_id=%s message=%r",
-        selected,
-        message[:200],
-    )
-    start = time.perf_counter()
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{OPENCODE_API_URL}/session/{selected}/prompt_async",
-                json={
-                    # "model": {"providerID": provider_id, "modelID": model_id},
-                    "parts": [{"type": "text", "text": message}],
-                },
-                timeout=10.0,
-            )
-            elapsed = time.perf_counter() - start
-            if response.status_code == 204:
-                log_stage(
-                    logging.INFO,
-                    "opencode.session",
-                    "Queued message to OpenCode session: %s",
-                    selected,
-                )
-                log_stage(
-                    logging.INFO,
-                    "tool.add_message_to_opencode_session",
-                    "session_id=%s elapsed=%.2fs",
-                    selected,
-                    elapsed,
-                )
-                return json.dumps(
-                    {
-                        "success": True,
-                        "session_id": selected,
-                        "queued": True,
-                    }
-                )
-            response.raise_for_status()
-            return json.dumps(
-                {
-                    "success": True,
-                    "session_id": selected,
-                    "status": response.status_code,
-                }
-            )
-    except Exception as e:
-        elapsed = time.perf_counter() - start
-        log_stage(
-            logging.WARNING,
-            "opencode.session",
-            "Failed to send message to OpenCode session %s: %s",
-            selected,
-            e,
-            exc_info=True,
-        )
-        log_stage(
-            logging.ERROR,
-            "tool.add_message_to_opencode_session",
-            "error after %.2fs: %s",
-            elapsed,
-            e,
-        )
-        return json.dumps({"success": False, "error": str(e)})
-
-
-DEFAULT_SAMPLE_RATE = 16000
-MAX_HISTORY_MESSAGES = 12
-OPENCODE_API_URL = os.getenv("OPENCODE_API_URL", "http://127.0.0.1:4096")
 logger = logging.getLogger("speakbro")
 logger.setLevel(logging.DEBUG)
 if not logger.handlers:
@@ -841,6 +376,819 @@ if not logger.handlers:
         logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
     )
     logger.addHandler(_handler)
+
+
+DEFAULT_SAMPLE_RATE = 16000
+MAX_HISTORY_MESSAGES = 12
+
+
+class OpenCodeServerManager:
+    """Keep a local `opencode serve` process healthy for SpeakBro."""
+
+    def __init__(self) -> None:
+        self._proc: subprocess.Popen | None = None
+        self._lock = asyncio.Lock()
+        self._started_by_us = False
+
+    @property
+    def base_url(self) -> str:
+        return OPENCODE_API_URL
+
+    def _directory_headers(self, directory: str | None) -> dict[str, str]:
+        if directory:
+            return {"x-opencode-directory": directory}
+        return {}
+
+    async def health(self) -> dict[str, Any]:
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                response = await client.get(f"{self.base_url}/global/health")
+                if response.status_code == 200:
+                    data = response.json() if response.content else {}
+                    return {
+                        "ok": True,
+                        "version": data.get("version"),
+                        "healthy": data.get("healthy", True),
+                    }
+                return {"ok": False, "status": response.status_code}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    def _build_serve_command(self) -> list[str] | None:
+        binary = shutil.which("opencode")
+        if not binary:
+            return None
+        cmd = [
+            binary,
+            "serve",
+            "--hostname",
+            OPENCODE_HOST,
+            "--port",
+            str(OPENCODE_PORT),
+        ]
+        for origin in OPENCODE_CORS:
+            cmd.extend(["--cors", origin])
+        return cmd
+
+    def _spawn(self) -> tuple[bool, str]:
+        if self._proc is not None and self._proc.poll() is None:
+            return True, "already running (managed)"
+
+        cmd = self._build_serve_command()
+        if not cmd:
+            return False, "opencode binary not found on PATH"
+
+        log_stage(logging.INFO, "opencode.server", "Starting: %s", " ".join(cmd))
+        creationflags = 0
+        if os.name == "nt":
+            creationflags = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+
+        try:
+            self._proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                creationflags=creationflags,
+            )
+            self._started_by_us = True
+            return True, f"spawned pid={self._proc.pid}"
+        except Exception as exc:
+            self._proc = None
+            self._started_by_us = False
+            return False, f"spawn failed: {exc}"
+
+    async def ensure(self, force_start: bool = False) -> dict[str, Any]:
+        """Return healthy OpenCode server, auto-starting if configured."""
+        async with self._lock:
+            health = await self.health()
+            if health.get("ok"):
+                return {
+                    "success": True,
+                    "running": True,
+                    "started": False,
+                    "url": self.base_url,
+                    "version": health.get("version"),
+                }
+
+            if not OPENCODE_AUTO_START and not force_start:
+                return {
+                    "success": False,
+                    "running": False,
+                    "error": (
+                        f"OpenCode server not reachable at {self.base_url}. "
+                        "Set OPENCODE_AUTO_START=true or run `opencode serve`."
+                    ),
+                }
+
+            ok, detail = await asyncio.to_thread(self._spawn)
+            if not ok:
+                return {"success": False, "running": False, "error": detail}
+
+            # Wait for health
+            deadline = time.perf_counter() + 12.0
+            last_err = detail
+            while time.perf_counter() < deadline:
+                await asyncio.sleep(0.35)
+                health = await self.health()
+                if health.get("ok"):
+                    log_stage(
+                        logging.INFO,
+                        "opencode.server",
+                        "Healthy at %s version=%s",
+                        self.base_url,
+                        health.get("version"),
+                    )
+                    return {
+                        "success": True,
+                        "running": True,
+                        "started": True,
+                        "url": self.base_url,
+                        "version": health.get("version"),
+                        "detail": detail,
+                    }
+                last_err = health.get("error") or health.get("status") or last_err
+
+            return {
+                "success": False,
+                "running": False,
+                "error": f"OpenCode started but not healthy: {last_err}",
+                "detail": detail,
+            }
+
+    def stop(self) -> None:
+        if not self._started_by_us or self._proc is None:
+            return
+        proc = self._proc
+        self._proc = None
+        self._started_by_us = False
+        try:
+            if proc.poll() is None:
+                if os.name == "nt":
+                    proc.send_signal(signal.CTRL_BREAK_EVENT)  # type: ignore[attr-defined]
+                    try:
+                        proc.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                else:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=3)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+            log_stage(logging.INFO, "opencode.server", "Stopped managed OpenCode process")
+        except Exception as exc:
+            log_stage(
+                logging.WARNING,
+                "opencode.server",
+                "Failed stopping OpenCode: %s",
+                exc,
+            )
+
+
+opencode_manager = OpenCodeServerManager()
+atexit.register(opencode_manager.stop)
+
+
+def _resolve_session_id(ctx: RunContext[WebSocket], session_id: str | None) -> str | None:
+    return session_id or getattr(ctx.deps, "selected_session_id", None)
+
+
+def _resolve_directory(ctx: RunContext[WebSocket], directory: str | None = None) -> str | None:
+    return directory or getattr(ctx.deps, "project_directory", None)
+
+
+def _text_from_parts(parts: object, max_chars: int = 800) -> str:
+    if not isinstance(parts, list):
+        return ""
+    texts: list[str] = []
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
+        if part.get("type") != "text":
+            continue
+        text = part.get("text")
+        if isinstance(text, str) and text.strip():
+            texts.append(text.strip())
+    joined = "\n".join(texts).strip()
+    if len(joined) > max_chars:
+        return joined[: max_chars - 1] + "…"
+    return joined
+
+
+def _message_created_at(item: object) -> int:
+    if not isinstance(item, dict):
+        return 0
+    info = item.get("info")
+    if not isinstance(info, dict):
+        return 0
+    time_info = info.get("time")
+    if not isinstance(time_info, dict):
+        return 0
+    created = time_info.get("created")
+    return created if isinstance(created, int) else 0
+
+
+def _status_label(status: object) -> str:
+    if status is None:
+        return "unknown"
+    if isinstance(status, str):
+        return status
+    if isinstance(status, dict):
+        return str(
+            status.get("type")
+            or status.get("state")
+            or status.get("status")
+            or "unknown"
+        )
+    return str(status)
+
+
+async def _oc_request(
+    method: str,
+    path: str,
+    *,
+    directory: str | None = None,
+    json_body: dict | None = None,
+    params: dict | None = None,
+    timeout: float = 15.0,
+    expect_json: bool = True,
+) -> tuple[bool, Any, str | None]:
+    """HTTP helper that ensures server health first."""
+    ensured = await opencode_manager.ensure()
+    if not ensured.get("success"):
+        return False, None, ensured.get("error") or "OpenCode server unavailable"
+
+    url = f"{OPENCODE_API_URL}{path if path.startswith('/') else '/' + path}"
+    headers = opencode_manager._directory_headers(directory)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.request(
+                method,
+                url,
+                headers=headers or None,
+                json=json_body,
+                params=params,
+            )
+            if response.status_code == 204:
+                return True, None, None
+            if response.status_code >= 400:
+                body = (response.text or "")[:300]
+                return False, None, f"HTTP {response.status_code}: {body}"
+            if not expect_json or not response.content:
+                return True, None, None
+            return True, response.json(), None
+    except Exception as exc:
+        return False, None, str(exc)
+
+
+async def _notify_session_selected(ctx: RunContext[WebSocket], session_id: str) -> None:
+    ctx.deps.selected_session_id = session_id
+    try:
+        await ctx.deps.send_json({"type": "opencode_session", "sessionId": session_id})
+    except Exception:
+        pass
+
+
+async def _fetch_session_snapshot(
+    session_id: str,
+    *,
+    directory: str | None = None,
+    message_limit: int = 4,
+) -> dict[str, Any]:
+    """Bundle status + todos + recent messages + diff summary for one session."""
+    status_ok, status_map, status_err = await _oc_request(
+        "GET", "/session/status", directory=directory, timeout=8.0
+    )
+    status = None
+    if status_ok and isinstance(status_map, dict):
+        status = status_map.get(session_id)
+
+    todos_ok, todos, _ = await _oc_request(
+        "GET", f"/session/{session_id}/todo", directory=directory, timeout=8.0
+    )
+    msgs_ok, messages, _ = await _oc_request(
+        "GET",
+        f"/session/{session_id}/message",
+        directory=directory,
+        params={"limit": message_limit},
+        timeout=10.0,
+    )
+    diff_ok, diffs, _ = await _oc_request(
+        "GET", f"/session/{session_id}/diff", directory=directory, timeout=10.0
+    )
+
+    recent: list[dict] = []
+    if msgs_ok and isinstance(messages, list):
+        ordered = sorted(
+            (m for m in messages if isinstance(m, dict)),
+            key=_message_created_at,
+        )[-message_limit:]
+        for item in ordered:
+            info = item.get("info") if isinstance(item.get("info"), dict) else {}
+            recent.append(
+                {
+                    "role": info.get("role"),
+                    "content": _text_from_parts(item.get("parts"), max_chars=500),
+                }
+            )
+
+    todo_items: list[dict] = []
+    if todos_ok and isinstance(todos, list):
+        for t in todos[:12]:
+            if not isinstance(t, dict):
+                continue
+            todo_items.append(
+                {
+                    "content": t.get("content") or t.get("title") or t.get("text") or "",
+                    "status": t.get("status") or t.get("state") or "",
+                }
+            )
+
+    diff_summary = {"files": 0, "additions": 0, "deletions": 0, "paths": []}
+    if diff_ok and isinstance(diffs, list):
+        paths: list[str] = []
+        additions = 0
+        deletions = 0
+        for d in diffs:
+            if not isinstance(d, dict):
+                continue
+            path = d.get("file") or d.get("path") or d.get("name")
+            if path:
+                paths.append(str(path))
+            additions += int(d.get("additions") or d.get("add") or 0)
+            deletions += int(d.get("deletions") or d.get("del") or 0)
+        diff_summary = {
+            "files": len(paths),
+            "additions": additions,
+            "deletions": deletions,
+            "paths": paths[:15],
+        }
+
+    return {
+        "session_id": session_id,
+        "status": _status_label(status),
+        "status_raw": status,
+        "todos": todo_items,
+        "todo_count": len(todo_items),
+        "recent_messages": recent,
+        "diff": diff_summary,
+        "status_error": status_err if not status_ok else None,
+    }
+
+
+async def _queue_prompt(
+    session_id: str,
+    message: str,
+    *,
+    directory: str | None = None,
+) -> tuple[bool, str | None]:
+    ok, _, err = await _oc_request(
+        "POST",
+        f"/session/{session_id}/prompt_async",
+        directory=directory,
+        json_body={"parts": [{"type": "text", "text": message}]},
+        timeout=20.0,
+        expect_json=False,
+    )
+    return ok, err
+
+
+@agent.tool(strict=False)
+async def ensure_opencode_server(ctx: RunContext[WebSocket]) -> str:
+    """Make sure the OpenCode HTTP server is running (auto-starts `opencode serve` if needed).
+
+    Call this only if another OpenCode tool failed with a connection error, or if the user
+    explicitly asks you to start OpenCode. Most coding tools already call this internally.
+    """
+    log_stage(logging.INFO, "tool.ensure_opencode_server", "called")
+    result = await opencode_manager.ensure(force_start=True)
+    return json.dumps(result)
+
+
+@agent.tool(strict=False)
+async def run_coding_task(
+    ctx: RunContext[WebSocket],
+    task: str,
+    title: str | None = None,
+    session_id: str | None = None,
+    directory: str | None = None,
+    wait_for_progress: bool = True,
+    wait_seconds: float = 8.0,
+) -> str:
+    """PRIMARY coding tool. Hand a full coding job to OpenCode in one call.
+
+    Use this whenever the user wants to build, fix, refactor, implement, or vibe-code something.
+    It will: (1) ensure OpenCode server is up, (2) reuse the selected/active session or create
+    a new one in the selected project directory, (3) queue a clear engineering prompt, and
+    (4) optionally wait briefly and return status/todos/recent output.
+
+    Prefer this over create+send separately. Write `task` as a concrete brief for a coding agent.
+    Omit session_id to use the UI-selected session. Omit directory to use the UI-selected project.
+    """
+    selected_dir = _resolve_directory(ctx, directory)
+    selected = _resolve_session_id(ctx, session_id)
+    start = time.perf_counter()
+    log_stage(
+        logging.INFO,
+        "tool.run_coding_task",
+        "session=%s dir=%r task=%r",
+        selected,
+        selected_dir,
+        task[:180],
+    )
+
+    ensured = await opencode_manager.ensure()
+    if not ensured.get("success"):
+        return json.dumps({"success": False, "error": ensured.get("error"), "phase": "server"})
+
+    created = False
+    session_title = title or (task.strip().split("\n")[0][:60] or "SpeakBro coding")
+
+    if not selected:
+        ok, data, err = await _oc_request(
+            "POST",
+            "/session",
+            directory=selected_dir,
+            json_body={"title": session_title},
+            timeout=10.0,
+        )
+        if not ok or not isinstance(data, dict) or not data.get("id"):
+            return json.dumps(
+                {"success": False, "error": err or "Failed to create session", "phase": "create"}
+            )
+        selected = data["id"]
+        created = True
+        await _notify_session_selected(ctx, selected)
+
+    # Brief OpenCode like a senior engineer, not like casual voice chat.
+    kickoff = (
+        "You are the coding agent for this project. Execute the following request fully.\n"
+        "Be concrete: inspect the repo, make the changes, run checks if appropriate, and "
+        "leave the workspace in a working state.\n\n"
+        f"REQUEST:\n{task.strip()}"
+    )
+    if selected_dir:
+        kickoff = f"Project directory: {selected_dir}\n\n{kickoff}"
+
+    queued_ok, queue_err = await _queue_prompt(selected, kickoff, directory=selected_dir)
+    if not queued_ok:
+        return json.dumps(
+            {
+                "success": False,
+                "error": queue_err or "Failed to queue task",
+                "session_id": selected,
+                "created": created,
+                "phase": "queue",
+            }
+        )
+
+    progress = None
+    if wait_for_progress and wait_seconds > 0:
+        await asyncio.sleep(min(max(wait_seconds, 1.0), 25.0))
+        progress = await _fetch_session_snapshot(selected, directory=selected_dir)
+
+    elapsed = time.perf_counter() - start
+    log_stage(
+        logging.INFO,
+        "tool.run_coding_task",
+        "done session=%s created=%s elapsed=%.2fs",
+        selected,
+        created,
+        elapsed,
+    )
+    return json.dumps(
+        {
+            "success": True,
+            "session_id": selected,
+            "created": created,
+            "directory": selected_dir,
+            "queued": True,
+            "title": session_title,
+            "progress": progress,
+            "elapsed_seconds": round(elapsed, 2),
+            "speak_hint": (
+                "Tell the user work is running in OpenCode. "
+                "Mention progress todos or file changes if present. No raw IDs."
+            ),
+        }
+    )
+
+
+@agent.tool(strict=False)
+async def create_opencode_session(
+    ctx: RunContext[WebSocket],
+    title: str = "SpeakBro session",
+    message: str | None = None,
+    directory: str | None = None,
+) -> str:
+    """Create a new OpenCode coding session, optionally kick off work with `message`.
+
+    Prefer `run_coding_task` for most coding asks. Use this when you only need a fresh session
+    shell, or the user explicitly wants a new session. Always pass the selected project
+    directory when the UI has one.
+    """
+    selected_directory = _resolve_directory(ctx, directory)
+    log_stage(
+        logging.INFO,
+        "tool.create_opencode_session",
+        "title=%r directory=%r",
+        title,
+        selected_directory,
+    )
+    start = time.perf_counter()
+
+    ok, data, err = await _oc_request(
+        "POST",
+        "/session",
+        directory=selected_directory,
+        json_body={"title": title},
+        timeout=10.0,
+    )
+    if not ok or not isinstance(data, dict) or not data.get("id"):
+        return json.dumps({"success": False, "error": err or "Failed to create OpenCode session"})
+
+    session_id = data["id"]
+    await _notify_session_selected(ctx, session_id)
+
+    queued = False
+    queue_error = None
+    if message:
+        queued, queue_error = await _queue_prompt(
+            session_id, message, directory=selected_directory
+        )
+
+    elapsed = time.perf_counter() - start
+    log_stage(
+        logging.INFO,
+        "tool.create_opencode_session",
+        "session_id=%s queued=%s elapsed=%.2fs",
+        session_id,
+        queued,
+        elapsed,
+    )
+    return json.dumps(
+        {
+            "success": True,
+            "session_id": session_id,
+            "title": data.get("title", title),
+            "directory": selected_directory,
+            "queued": queued,
+            "queue_error": queue_error,
+        }
+    )
+
+
+@agent.tool(strict=False)
+async def list_opencode_sessions(ctx: RunContext[WebSocket]) -> str:
+    """List OpenCode sessions with titles, directories, and live status.
+
+    Use to discover sessions, pick one, or tell the user what coding work is active.
+    """
+    log_stage(logging.INFO, "tool.list_opencode_sessions", "called")
+    directory = _resolve_directory(ctx)
+    ok, sessions, err = await _oc_request("GET", "/session", directory=directory, timeout=8.0)
+    if not ok:
+        return json.dumps({"success": False, "error": err})
+
+    status_ok, status_map, _ = await _oc_request(
+        "GET", "/session/status", directory=directory, timeout=8.0
+    )
+    statuses = status_map if status_ok and isinstance(status_map, dict) else {}
+
+    selected = getattr(ctx.deps, "selected_session_id", None)
+    summaries = []
+    if isinstance(sessions, list):
+        for s in sessions:
+            if not isinstance(s, dict):
+                continue
+            sid = s.get("id")
+            summaries.append(
+                {
+                    "id": sid,
+                    "title": s.get("title", "Untitled"),
+                    "directory": s.get("directory"),
+                    "status": _status_label(statuses.get(sid)) if sid else "unknown",
+                    "selected": sid == selected,
+                    "updated": (s.get("time") or {}).get("updated")
+                    if isinstance(s.get("time"), dict)
+                    else None,
+                }
+            )
+
+    return json.dumps(
+        {
+            "success": True,
+            "sessions": summaries,
+            "count": len(summaries),
+            "selected_session_id": selected,
+            "project_directory": directory,
+        }
+    )
+
+
+@agent.tool(strict=False)
+async def select_opencode_session(
+    ctx: RunContext[WebSocket],
+    session_id: str,
+) -> str:
+    """Set the active OpenCode session SpeakBro will control (same as UI selection).
+
+    Use after listing sessions when the user names one, or when switching workstreams.
+    """
+    if not session_id or not str(session_id).strip():
+        return json.dumps({"success": False, "error": "session_id is required"})
+
+    ok, data, err = await _oc_request("GET", f"/session/{session_id}", timeout=8.0)
+    if not ok:
+        return json.dumps({"success": False, "error": err or "Session not found"})
+
+    await _notify_session_selected(ctx, session_id)
+    title = data.get("title") if isinstance(data, dict) else None
+    log_stage(logging.INFO, "tool.select_opencode_session", "session_id=%s", session_id)
+    return json.dumps(
+        {
+            "success": True,
+            "session_id": session_id,
+            "title": title,
+            "selected": True,
+        }
+    )
+
+
+@agent.tool(strict=False)
+async def send_opencode_work(
+    ctx: RunContext[WebSocket],
+    message: str,
+    session_id: str | None = None,
+) -> str:
+    """Send a follow-up instruction or steer to an existing OpenCode session (async).
+
+    Use for "also do X", "stop doing Y, do Z instead", "add tests", etc.
+    Prefer `run_coding_task` for brand-new jobs. Omit session_id to use the selected session.
+    """
+    selected = _resolve_session_id(ctx, session_id)
+    if not selected:
+        return json.dumps(
+            {
+                "success": False,
+                "error": (
+                    "No session selected. Call run_coding_task / create_opencode_session, "
+                    "or ask the user to select one."
+                ),
+            }
+        )
+
+    directory = _resolve_directory(ctx)
+    log_stage(
+        logging.INFO,
+        "tool.send_opencode_work",
+        "session_id=%s message=%r",
+        selected,
+        message[:200],
+    )
+    ok, err = await _queue_prompt(selected, message, directory=directory)
+    if not ok:
+        return json.dumps({"success": False, "error": err, "session_id": selected})
+    return json.dumps({"success": True, "session_id": selected, "queued": True})
+
+
+# Backwards-compatible alias name for any old prompt references
+add_message_to_opencode_session = send_opencode_work
+
+
+@agent.tool(strict=False)
+async def check_opencode_progress(
+    ctx: RunContext[WebSocket],
+    session_id: str | None = None,
+) -> str:
+    """Get live OpenCode progress: status, todos, recent messages, and file diff summary.
+
+    Use when the user asks "how's it going", "what did it do", "is it done", or before
+    deciding to send more work / abort. Prefer this over raw message dumps.
+    """
+    selected = _resolve_session_id(ctx, session_id)
+    if not selected:
+        return json.dumps(
+            {
+                "success": False,
+                "error": "No session selected. List sessions or create one first.",
+            }
+        )
+
+    directory = _resolve_directory(ctx)
+    log_stage(logging.INFO, "tool.check_opencode_progress", "session_id=%s", selected)
+    snapshot = await _fetch_session_snapshot(selected, directory=directory)
+    snapshot["success"] = True
+    snapshot["speak_hint"] = (
+        "Summarize status, open todos, and key file changes in one short spoken sentence."
+    )
+    return json.dumps(snapshot)
+
+
+@agent.tool(strict=False)
+async def view_opencode_messages(
+    ctx: RunContext[WebSocket],
+    session_id: str | None = None,
+    limit: int = 6,
+) -> str:
+    """Read recent text messages from an OpenCode session.
+
+    Use for detailed recall of what was said/done. For a quick spoken status update,
+    prefer check_opencode_progress.
+    """
+    selected = _resolve_session_id(ctx, session_id)
+    if not selected:
+        return json.dumps(
+            {
+                "success": False,
+                "error": "No session selected. List sessions or create one first.",
+            }
+        )
+
+    limit = max(1, min(int(limit or 6), 20))
+    directory = _resolve_directory(ctx)
+    ok, messages, err = await _oc_request(
+        "GET",
+        f"/session/{selected}/message",
+        directory=directory,
+        params={"limit": limit},
+        timeout=12.0,
+    )
+    if not ok:
+        return json.dumps({"success": False, "error": err, "session_id": selected})
+
+    result = []
+    if isinstance(messages, list):
+        ordered = sorted(
+            (m for m in messages if isinstance(m, dict)),
+            key=_message_created_at,
+        )[-limit:]
+        for item in ordered:
+            info = item.get("info") if isinstance(item.get("info"), dict) else {}
+            result.append(
+                {
+                    "id": info.get("id"),
+                    "role": info.get("role"),
+                    "created": (info.get("time") or {}).get("created")
+                    if isinstance(info.get("time"), dict)
+                    else None,
+                    "content": _text_from_parts(item.get("parts"), max_chars=1000),
+                }
+            )
+
+    return json.dumps(
+        {
+            "success": True,
+            "session_id": selected,
+            "message_count": len(result),
+            "messages": result,
+        }
+    )
+
+
+@agent.tool(strict=False)
+async def summarize_opencode_session(
+    ctx: RunContext[WebSocket],
+    session_id: str | None = None,
+) -> str:
+    """Quick view of the last few OpenCode messages (alias of a short view_opencode_messages).
+
+    Prefer check_opencode_progress for spoken status. Keep this for light history peeks.
+    """
+    return await view_opencode_messages(ctx, session_id=session_id, limit=3)
+
+
+@agent.tool(strict=False)
+async def abort_opencode_session(
+    ctx: RunContext[WebSocket],
+    session_id: str | None = None,
+) -> str:
+    """Abort the currently running OpenCode generation for a session.
+
+    Use when the user says stop, cancel, abort, or the agent is stuck doing the wrong thing.
+    """
+    selected = _resolve_session_id(ctx, session_id)
+    if not selected:
+        return json.dumps(
+            {
+                "success": False,
+                "error": "No session selected to abort.",
+            }
+        )
+
+    directory = _resolve_directory(ctx)
+    log_stage(logging.INFO, "tool.abort_opencode_session", "session_id=%s", selected)
+    ok, data, err = await _oc_request(
+        "POST",
+        f"/session/{selected}/abort",
+        directory=directory,
+        timeout=10.0,
+        expect_json=True,
+    )
+    if not ok:
+        return json.dumps({"success": False, "error": err, "session_id": selected})
+    return json.dumps({"success": True, "session_id": selected, "aborted": True, "result": data})
 
 
 def safe_positive_int(value: object, default: int) -> int:
@@ -855,18 +1203,6 @@ def safe_positive_int(value: object, default: int) -> int:
 
 def safe_sample_rate(value: object, default: int = DEFAULT_SAMPLE_RATE) -> int:
     return safe_positive_int(value, default)
-
-
-def log_stage(
-    level: int,
-    stage: str,
-    message: str,
-    *args,
-    session_id: str | None = None,
-    exc_info=False,
-):
-    prefix = f"[{session_id}] {stage}" if session_id else stage
-    logger.log(level, "%s: " + message, prefix, *args, exc_info=exc_info)
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -888,7 +1224,41 @@ def get_whisper_model() -> WhisperModel:
     )
 
 
-app = FastAPI(title="SpeakBro")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Boot OpenCode automatically so coding tools work without a manual serve step."""
+    if OPENCODE_AUTO_START:
+        result = await opencode_manager.ensure()
+        if result.get("success"):
+            log_stage(
+                logging.INFO,
+                "startup",
+                "OpenCode ready at %s (started=%s version=%s)",
+                result.get("url"),
+                result.get("started"),
+                result.get("version"),
+            )
+        else:
+            log_stage(
+                logging.WARNING,
+                "startup",
+                "OpenCode not available yet: %s",
+                result.get("error"),
+            )
+    else:
+        log_stage(
+            logging.INFO,
+            "startup",
+            "OPENCODE_AUTO_START disabled; expecting server at %s",
+            OPENCODE_API_URL,
+        )
+    try:
+        yield
+    finally:
+        opencode_manager.stop()
+
+
+app = FastAPI(title="SpeakBro", lifespan=lifespan)
 MEMORY_LIST_PAGE_SIZE = 100
 
 
@@ -906,8 +1276,17 @@ def append_history(messages: list[dict], role: str, content: str) -> None:
 
 
 @app.get("/healthz")
-async def healthz() -> dict[str, str]:
-    return {"status": "ok"}
+async def healthz() -> dict:
+    oc = await opencode_manager.health()
+    return {
+        "status": "ok",
+        "opencode": {
+            "url": OPENCODE_API_URL,
+            "ok": bool(oc.get("ok")),
+            "version": oc.get("version"),
+            "auto_start": OPENCODE_AUTO_START,
+        },
+    }
 
 
 @app.post("/memories/seed")
@@ -1189,37 +1568,50 @@ async def generate_llm_response(
         user_prompt = non_system[-1]["content"] if non_system else ""
         history = _convert_history(non_system[:-1]) if len(non_system) > 1 else []
 
-        # Attach the selected OpenCode session directly to this voice turn so the
-        # spoken request is explicitly tied to the session the user is managing.
+        project_directory = getattr(websocket, "project_directory", None)
+        # Compact controller context — keep spoken turns clean, give tools what they need.
+        context_bits: list[str] = []
         if selected_session_id:
-            user_prompt = (
-                f"[Active OpenCode session: {selected_session_id}]\n{user_prompt}"
-            )
+            context_bits.append(f"active_opencode_session={selected_session_id}")
+        else:
+            context_bits.append("active_opencode_session=none")
+        if project_directory:
+            context_bits.append(f"project_directory={project_directory}")
+        else:
+            context_bits.append("project_directory=none")
+        user_prompt = (
+            f"[controller_context {' | '.join(context_bits)}]\n{user_prompt}"
+        )
 
-        instructions = system_msg
+        instructions = system_msg or SYSTEM_PROMPT
+        controller_notes = [
+            "You are the vibecoding controller for this turn.",
+            "Omit session_id / directory on tools to use the active values from controller_context.",
+            "For coding work prefer run_coding_task in a single tool call.",
+            "Never speak raw session IDs or dump JSON to the user.",
+        ]
         if selected_session_id:
-            instructions = (
-                f"{system_msg}\n\n"
-                f"The user has selected OpenCode session '{selected_session_id}' for you to "
-                f"manage. Prefer targeting this session when sending messages or summarizing "
-                f"unless the user names a different one."
+            controller_notes.append(
+                f"Active OpenCode session is selected — default all session tools to it "
+                f"unless the user names another."
             )
         else:
-            instructions = (
-                f"{system_msg}\n\n"
-                f"No OpenCode session is currently selected. If the user asks you to manage or "
-                f"message a session, create one or ask them to select one in the UI."
+            controller_notes.append(
+                "No OpenCode session selected — create one via run_coding_task when coding is needed."
             )
-        project_directory = getattr(websocket, "project_directory", None)
         if project_directory:
-            user_prompt = (
-                f"[Selected project directory: {project_directory}]\n{user_prompt}"
+            controller_notes.append(
+                f"Selected project directory is '{project_directory}'. "
+                "Always pass this exact path when creating sessions or running coding tasks."
             )
-            instructions = (
-                f"{instructions}\n\nThe user selected project directory "
-                f"'{project_directory}'. When calling create_opencode_session, pass this "
-                f"exact value in its directory argument so OpenCode opens in that directory."
+        else:
+            controller_notes.append(
+                "No project directory selected — coding still works, but prefer asking the user "
+                "to pick a Project folder for repo-local work when it matters."
             )
+        instructions = f"{instructions}\n\n## Live controller state\n" + "\n".join(
+            f"- {note}" for note in controller_notes
+        )
 
         log_stage(
             logging.INFO,
@@ -1375,6 +1767,32 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     websocket.project_directory = None
     current_turn_task: asyncio.Task | None = None
     current_turn_interrupt: threading.Event | None = None
+
+    async def send_status(message: str, phase: str = "idle", **extra: Any) -> None:
+        """Send one consistent status event to the browser."""
+        await websocket.send_json(
+            {"type": "status", "phase": phase, "message": message, **extra}
+        )
+
+    def cancel_active_turn() -> None:
+        """Stop the active voice/text pipeline, if one exists."""
+        if current_turn_interrupt is not None:
+            current_turn_interrupt.set()
+        if current_turn_task is not None and not current_turn_task.done():
+            current_turn_task.cancel()
+
+    async def set_project_directory(directory: str | None) -> None:
+        """Update the connection-scoped project and notify the browser."""
+        normalized = (directory or "").strip()
+        websocket.project_directory = normalized or None
+        await websocket.send_json(
+            {"type": "project_directory", "directory": normalized}
+        )
+        await send_status(
+            f"Project directory set to {normalized}."
+            if normalized
+            else "No project directory selected."
+        )
 
     async def process_voice_turn(pcm_bytes: bytes, sample_rate: int) -> None:
         nonlocal current_turn_interrupt
@@ -1718,10 +2136,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
             if event_type == "text":
                 text = str(payload.get("text", "")).strip()
                 if text:
-                    if current_turn_task is not None and not current_turn_task.done():
-                        if current_turn_interrupt is not None:
-                            current_turn_interrupt.set()
-                        current_turn_task.cancel()
+                    cancel_active_turn()
                     current_turn_task = asyncio.create_task(process_text_turn(text))
 
             elif event_type == "start":
@@ -1738,13 +2153,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     turn.sample_rate,
                     session_id=session_id,
                 )
-                await websocket.send_json(
-                    {
-                        "type": "status",
-                        "phase": "recording",
-                        "sampleRate": turn.sample_rate,
-                        "message": f"Recording at {turn.sample_rate} Hz.",
-                    }
+                await send_status(
+                    f"Recording at {turn.sample_rate} Hz.",
+                    phase="recording",
+                    sampleRate=turn.sample_rate,
                 )
                 log_stage(
                     logging.DEBUG,
@@ -1804,9 +2216,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                         "Previous turn task still active; cancelling before starting a new one",
                         session_id=session_id,
                     )
-                    if current_turn_interrupt is not None:
-                        current_turn_interrupt.set()
-                    current_turn_task.cancel()
+                    cancel_active_turn()
 
                 current_turn_task = asyncio.create_task(
                     process_voice_turn(pcm_bytes, turn.sample_rate)
@@ -1822,40 +2232,21 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
                     session_id=session_id,
                 )
                 turn.request_interrupt()
-                if current_turn_interrupt is not None:
-                    current_turn_interrupt.set()
-                if current_turn_task is not None and not current_turn_task.done():
-                    current_turn_task.cancel()
-                await websocket.send_json(
-                    {
-                        "type": "status",
-                        "phase": "idle",
-                        "message": "Interrupted. Ready for the next turn.",
-                    }
-                )
+                cancel_active_turn()
+                await send_status("Interrupted. Ready for the next turn.")
+
+            elif event_type == "clear_session":
+                cancel_active_turn()
+                session_history[:] = [{"role": "system", "content": SYSTEM_PROMPT}]
+                turn.finish()
+                await send_status("Session cleared. Ready for the next turn.")
 
             elif event_type == "choose_project_directory":
                 directory = await asyncio.to_thread(choose_project_directory_native)
-                directory = directory.strip()
-                websocket.project_directory = directory or None
-                await websocket.send_json({
-                    "type": "project_directory",
-                    "directory": directory,
-                })
-                await websocket.send_json({
-                    "type": "status",
-                    "phase": "idle",
-                    "message": f"Project directory set to {directory}." if directory else "No project directory selected.",
-                })
+                await set_project_directory(directory)
 
             elif event_type == "set_project_directory":
-                directory = str(payload.get("directory", "")).strip()
-                websocket.project_directory = directory or None
-                await websocket.send_json({
-                    "type": "status",
-                    "phase": "idle",
-                    "message": f"Project directory set to {directory}." if directory else "Project directory cleared.",
-                })
+                await set_project_directory(str(payload.get("directory", "")))
 
             elif event_type == "select_session":
                 new_selection = payload.get("sessionId")

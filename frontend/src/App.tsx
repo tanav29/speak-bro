@@ -65,14 +65,14 @@ function floatTo16BitPCM(input) {
 
 const PHASE_LABELS = {
   idle: "Hold to talk",
-  listening: "Listening...",
-  sending: "Sending...",
-  thinking: "Thinking...",
-  speaking: "Tap to interrupt",
+  listening: "Listening",
+  sending: "Sending",
+  thinking: "Thinking",
+  speaking: "Tap to stop",
   error: "Error",
-  "requesting-mic": "Requesting mic...",
-  transcribing: "Transcribing...",
-  recording: "Recording...",
+  "requesting-mic": "Requesting mic",
+  transcribing: "Transcribing",
+  recording: "Listening",
   transcribed: "Got it",
 };
 
@@ -112,6 +112,8 @@ export default function App() {
   const chatEndRef = useRef(null);
   const hasConnectedRef = useRef(false);
   const selectedSessionIdRef = useRef(null);
+  const pendingProjectPickerRef = useRef(false);
+  const projectDirectoryRef = useRef("");
 
   const sendSelectedSession = useCallback((sessionId) => {
     if (socketRef.current?.readyState === WebSocket.OPEN) {
@@ -125,20 +127,15 @@ export default function App() {
     // The browser deliberately hides absolute filesystem paths. Ask the local
     // backend to open a native folder dialog so OpenCode gets the real path.
     if (socketRef.current?.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify({ type: "choose_project_directory" }));
+      socketRef.current.send(
+        JSON.stringify({ type: "choose_project_directory" }),
+      );
       setStatus("Choose a project directory...");
       return;
     }
     setStatus("Connecting...");
+    pendingProjectPickerRef.current = true;
     connectSocket();
-    window.setTimeout(() => {
-      if (socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({ type: "choose_project_directory" }));
-        setStatus("Choose a project directory...");
-      } else {
-        setStatus("Backend connection is unavailable.");
-      }
-    }, 700);
   }, []);
 
   const syncOpenCodeSnapshot = useCallback(async () => {
@@ -214,11 +211,6 @@ export default function App() {
       clearTimeout(reconnectTimerRef.current);
       reconnectTimerRef.current = null;
     }
-  }, []);
-
-  const clearChatHistory = useCallback(() => {
-    setChat([]);
-    setStatus("History cleared. Type a message or use the microphone.");
   }, []);
 
   const sendTextMessage = useCallback(
@@ -331,6 +323,21 @@ export default function App() {
     if (!sendEnd) setPhase("idle");
   }, []);
 
+  const clearChatHistory = useCallback(() => {
+    cleanupPlayback();
+    void stopRecording(false);
+    setChat([]);
+    setTextInput("");
+    setSelectedSessionId(null);
+    selectedSessionIdRef.current = null;
+    sendSelectedSession(null);
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: "clear_session" }));
+    }
+    setStatus("History cleared. Type a message or use the microphone.");
+    setPhase("idle");
+  }, [cleanupPlayback, sendSelectedSession, stopRecording]);
+
   const startRecording = useCallback(async () => {
     if (
       !socketRef.current ||
@@ -432,19 +439,6 @@ export default function App() {
 
       if (phase === "speaking") {
         interruptSpeaking();
-        if (talkMode === "hold") {
-          if (
-            typeof e.pointerId === "number" &&
-            e.currentTarget.setPointerCapture
-          ) {
-            try {
-              e.currentTarget.setPointerCapture(e.pointerId);
-            } catch {
-              /* ignore */
-            }
-          }
-          startRecording();
-        }
         return;
       }
 
@@ -536,11 +530,16 @@ export default function App() {
       setConnected(true);
       setStatus("Ready. Hold the button and speak.");
       setPhase("idle");
-      if (projectDirectory) {
+      if (pendingProjectPickerRef.current) {
+        pendingProjectPickerRef.current = false;
+        socket.send(JSON.stringify({ type: "choose_project_directory" }));
+        setStatus("Choose a project directory...");
+      }
+      if (projectDirectoryRef.current) {
         socket.send(
           JSON.stringify({
             type: "set_project_directory",
-            directory: projectDirectory,
+            directory: projectDirectoryRef.current,
           }),
         );
       }
@@ -599,7 +598,7 @@ export default function App() {
           }
           pendingAudioMimeRef.current = payload.mime || "audio/wav";
           appendEntry(setChat, "SpeakBro", payload.text || "", "assistant");
-          setStatus("Playing reply... Tap to interrupt.");
+          setStatus("Speaking... Tap to stop.");
           setPhase("speaking");
           cleanupPlayback();
           return;
@@ -610,7 +609,9 @@ export default function App() {
           return;
         }
         if (payload.type === "project_directory") {
-          setProjectDirectory(payload.directory || "");
+          const directory = payload.directory || "";
+          projectDirectoryRef.current = directory;
+          setProjectDirectory(directory);
           setStatus(
             payload.directory
               ? `Project: ${payload.directory}`
@@ -812,7 +813,7 @@ export default function App() {
       <main className="mx-auto max-w-7xl w-full h-full overflow-hidden">
         {activeTab === "orchestration" && (
           <div className="flex h-full min-h-0 w-full">
-            <div className="panel flex min-h-0 w-96 flex-col">
+            <div className="panel flex min-h-0 w-xl flex-col">
               <div className="panel-header shrink-0">
                 <h2 className="text-sm font-semibold text-white tracking-wide">
                   Transcript
@@ -868,7 +869,11 @@ export default function App() {
                   <Button
                     type="button"
                     onClick={chooseProjectDirectory}
-                    title={projectDirectory ? `Project: ${projectDirectory}` : "Choose project directory"}>
+                    title={
+                      projectDirectory
+                        ? `Project: ${projectDirectory}`
+                        : "Choose project directory"
+                    }>
                     {projectDirectory || "Project"} <ChevronDown />
                   </Button>
                   <Button

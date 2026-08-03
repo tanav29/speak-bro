@@ -260,7 +260,7 @@ function SessionDetail({ session, onBack, onDelete, deleting }) {
                     : "border-white/10 bg-white/5"
                 }`}>
                 <div className="mb-0.5 flex items-center justify-between gap-2">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+                  <span className="text-xs font-bold uppercase text-slate-500">
                     {isUser ? "You" : "OpenCode"}
                   </span>
                   <span className="text-xs text-slate-600">
@@ -476,13 +476,15 @@ export function OpenCodePanel({
                                           isActive ? null : session.id,
                                         )
                                       }
-                                      className={`rounded-md border p-1 font-semibold ${
+                                      className={`rounded-md border h-4 w-4 font-semibold flex items-center justify-center transition-colors ${
                                         isActive
-                                          ? "border-sky-500/40 bg-sky-500 text-white"
-                                          : "border-white/10 text-zinc-200 hover:text-white"
+                                          ? "border-blue-500/40 bg-blue-500 text-white"
+                                          : "border-white/10 hover:border-white/30 text-zinc-200 hover:text-white"
                                       }`}
                                       type="button">
-                                      <Check className="w-3 h-3" />
+                                      {isActive && (
+                                        <Check className="w-3 h-3" />
+                                      )}
                                     </button>
                                     {session.summary && (
                                       <span className="text-xs text-emerald-400/80">
