@@ -1,8 +1,6 @@
 # SpeakBro
 
-![SpeakBro demo](demo.png)
-
-[Loom demo](https://www.loom.com/share/6d2f029295484bcda62a58d4f01d78cd) | [Demo video on X](https://x.com/tanavtwt/status/2077837126079807786)
+<img width="1868" height="980" alt="image" src="https://github.com/user-attachments/assets/43e3a566-e030-4742-a6e1-7aa766a8f549" />
 
 SpeakBro is a local-first AI voice assistant with long-term memory. Hold Space to speak, and it transcribes your voice, reasons over the request, remembers useful facts, and speaks the answer back.
 
